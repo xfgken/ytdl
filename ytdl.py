@@ -138,6 +138,75 @@ def unique_path(d, base, ext):
     return p
 
 
+def media_info(path, ffprobe, ffmpeg):
+    """读取成品里的视频/音频编码。返回 (vcodec, acodec)，取不到返回 (None, None)。"""
+    if ffprobe and os.path.exists(ffprobe):
+        rc, t = run_capture([ffprobe, '-v', 'error', '-show_entries',
+                             'stream=codec_type,codec_name', '-of', 'csv=p=0', path], 180)
+        if rc == 0 and t.strip():
+            v = a = None
+            for line in t.strip().splitlines():
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) >= 2:
+                    if parts[0] == 'video' and not v:
+                        v = parts[1]
+                    elif parts[0] == 'audio' and not a:
+                        a = parts[1]
+            if v or a:
+                return v, a
+    if ffmpeg and os.path.exists(ffmpeg):
+        rc, t = run_capture([ffmpeg, '-hide_banner', '-i', path], 180)
+        v = a = None
+        for line in t.splitlines():
+            ln = line.strip()
+            if not ln.startswith('Stream #'):
+                continue
+            if 'Video:' in ln and not v:
+                v = ln.split('Video:')[1].strip().split(',')[0].strip().split(' ')[0]
+            elif 'Audio:' in ln and not a:
+                a = ln.split('Audio:')[1].strip().split(',')[0].strip().split(' ')[0]
+        return v, a
+    return None, None
+
+
+def to_aac(ffmpeg, path):
+    """只把音频转成 AAC（视频流直接复制，很快）。成功返回新文件路径。"""
+    out = os.path.splitext(path)[0] + '.aac.mp4'
+    rc, t = run_capture([ffmpeg, '-y', '-hide_banner', '-loglevel', 'error', '-i', path,
+                         '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+                         '-movflags', '+faststart', out], timeout=3600)
+    if rc == 0 and os.path.exists(out) and os.path.getsize(out) > 0:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return out
+    return None
+
+
+def refetch_with_audio(yt, ff, url, work, on_line=None):
+    """成品没有音轨时，改用「自带声音的单文件流」重新下载一次。"""
+    sel = 'b[ext=mp4][acodec!=none]/b[acodec!=none]/b'
+    c = [yt, '--no-playlist', '--newline', '-f', sel,
+         '--merge-output-format', 'mp4', '--remux-video', 'mp4']
+    if os.path.dirname(ff):
+        c += ['--ffmpeg-location', os.path.dirname(ff)]
+    c += ['-o', os.path.join(work, 'retry-audio.%(ext)s'), url]
+    try:
+        run_stream(c, on_line)
+    except Exception:
+        return None
+    best = None
+    for f in glob.glob(os.path.join(work, 'retry-audio*')):
+        b = os.path.basename(f)
+        if b.startswith('.') or '.f' in b:
+            continue
+        if os.path.splitext(f)[1].lower() not in ('.mp4', '.mkv', '.webm', '.m4a'):
+            continue
+        best = f
+    return best
+
+
 def probe(yt, url):
     rc, txt = run_capture([yt, '-J', '--no-warnings', '--no-playlist', url], timeout=240)
     i = txt.find('{')
@@ -306,10 +375,13 @@ def main():
             title_show = '仅音频 M4A'
         else:
             if chosen:
-                sel = chosen['id'] + '+ba[acodec^=mp4a]/ba/b'
+                cid = chosen['id']
+                # 音频优先挑 mp4a/aac：安卓播放器对 mp4 里的 opus 音频往往放不出声
+                sel = ('%s+ba[acodec^=mp4a]/%s+ba[acodec^=aac]/%s+ba' % (cid, cid, cid))
                 need_tc = (fmt_mode == 1) and (not chosen['avc'])
             else:
-                sel = 'bv*[ext=mp4]+ba[acodec^=mp4a]/bv*+ba/b'
+                sel = ('bv*[ext=mp4]+ba[acodec^=mp4a]/bv*+ba[acodec^=aac]/'
+                       'bv*[ext=mp4]+ba/bv*+ba/b[acodec!=none]/b')
                 need_tc = False
             cmd += ['-f', sel, '--merge-output-format', 'mp4', '--remux-video', 'mp4']
             if need_tc:
@@ -370,6 +442,33 @@ def main():
             if '.f' not in os.path.basename(f):
                 src = f
                 break
+
+        # ---- 成品校验：必须有音轨，而且音频要手机能播 ----
+        fp_path = shutil.which('ffprobe') or ''
+        if not fp_path:
+            cand2 = os.path.join(os.path.dirname(ff), 'ffprobe')
+            if os.path.exists(cand2):
+                fp_path = cand2
+        vcodec, acodec = media_info(src, fp_path, ff)
+        if not acodec:
+            warn('这个成品里没有音轨，正在改用「自带声音的单文件流」重新下载…')
+            newf = refetch_with_audio(yt, ff, url, work, on_line)
+            if newf:
+                src = newf
+                vcodec, acodec = media_info(src, fp_path, ff)
+        if not acodec:
+            warn('这个视频源本身可能就没有声音（YouTube 上确实有静音视频）')
+        elif acodec.lower() not in ('aac', 'mp4a', 'mp3'):
+            warn('音频编码是 %s，安卓播放器常常放不出声，正在转成 AAC（视频不重编码）…' % acodec)
+            fixed = to_aac(ff, src)
+            if fixed:
+                src = fixed
+                vcodec, acodec = media_info(src, fp_path, ff)
+                if acodec:
+                    ok('音频已转成 %s' % acodec)
+            else:
+                warn('音频转换失败，文件保持原样（可能这台设备没装 ffmpeg）')
+
         ext = os.path.splitext(src)[1].lower()
         base = safe_name(os.path.splitext(os.path.basename(src))[0])
         if fmt_mode == 2:
