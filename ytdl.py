@@ -639,6 +639,10 @@ def probe_stream(yt, url):
             if 'JavaScript runtime' not in st:
                 raw_once(st[:70], st, YELLOW)
             return
+        # 只外露 yt-dlp 的原生信息行，过滤 [debug] 之类的噪声
+        if not st.startswith(('[youtube]', '[info]', '[hlsnative]', '[generic]',
+                              '[vimeo]', '[soundcloud]', '[bilibili]', '[twitter]')):
+            return
         raw_line(st)
 
     def tick(elapsed):
@@ -646,7 +650,7 @@ def probe_stream(yt, url):
             spin_step('%.1fs' % elapsed)
 
     try:
-        run_stream_tick([yt, '-J', '--no-warnings', '--no-playlist', '--newline', url],
+        run_stream_tick([yt, '-J', '--verbose', '--no-playlist', '--newline', url],
                         on_line, tick, interval=0.15, timeout=300)
     finally:
         spin_done()
@@ -712,8 +716,15 @@ def ask_num(prompt, n, default=1):
 
 
 def show_banner(ytver, ff_ok, ffpath, out_dir):
+    w = min(48, max(32, term_width() - 4))
+    inner = w - 4
+    plain = 'ytdl · YouTube 下载器'
+    left = BOLD + CYAN + 'ytdl' + RESET + GRAY + ' · YouTube 下载器' + RESET
+    left += ' ' * max(0, inner - dwidth(plain))
     print()
-    print(BOLD + CYAN + 'ytdl' + RESET + DIM + ' · YouTube 下载器' + RESET)
+    print(GRAY + '╭' + '─' * (w - 2) + '╮' + RESET)
+    print(GRAY + '│' + RESET + ' ' + left + ' ' + GRAY + '│' + RESET)
+    print(GRAY + '╰' + '─' * (w - 2) + '╯' + RESET)
     print(GRAY + '  yt-dlp ' + ytver + ' · ffmpeg ' +
           ('已就绪' if ff_ok else '不可用') + RESET)
     print(GRAY + '  ' + out_dir + RESET)
@@ -722,38 +733,38 @@ def show_banner(ytver, ff_ok, ffpath, out_dir):
               '或让脚本自动装静态版到 bin/' + RESET)
 
 
-def show_info(info):
+def show_info(info, fmts=None):
+    """解析结果：带标签的详细信息"""
     title = str(info.get('title') or '(无标题)')
-    lim = max(20, term_width() - 6)
-    for ln in wrap(title, lim):
-        bullet(ln, hot=True)
-    meta = []
+    lim = max(20, term_width() - 10)
+    lines = wrap(title, lim)
+    print('  ' + GRAY + pad('标题', 8) + RESET + BOLD + WHITE + lines[0] + RESET)
+    for ln in lines[1:]:
+        print('  ' + ' ' * 8 + BOLD + WHITE + ln + RESET)
+
+    def row(label, value):
+        print('  ' + GRAY + pad(label, 8) + RESET + WHITE + value + RESET)
+
     if info.get('uploader'):
-        meta.append(str(info['uploader']))
+        row('作者', str(info['uploader']))
     if info.get('duration'):
-        meta.append(dur(info['duration']))
+        row('时长', dur(info['duration']))
     if info.get('view_count'):
-        meta.append(viewers(info['view_count']) + '次观看')
+        row('观看', viewers(info['view_count']) + '次')
     d = pretty_date(info.get('upload_date'))
     if d:
-        meta.append(d)
-    if meta:
-        bullet(' · '.join(meta))
+        row('发布', d)
+    if fmts:
+        row('清晰度', '共 %d 档，最高 %dp' % (len(fmts), fmts[0]['short']))
 
 
 def show_formats(fmts, default=0):
     for i, f in enumerate(fmts):
-        hot = (i == default)
-        col = WHITE if hot else GRAY
         tag = '原生 H.264' if f['avc'] else '需转码'
-        tagcol = GREEN if f['avc'] else YELLOW
-        if f['size']:
-            size = '≈ ' + human(f['size'])
-        else:
-            size = f['note'][:18] if f['note'] else ''
-        row = '%d) ' % (i + 1) + pad('%4sp' % f['short'], 7) + pad('%d×%d' % (f['w'], f['h']), 12)
-        print('  ' + col + row + RESET + tagcol + tag + RESET +
-              (GRAY + '  ' + size + RESET if size else ''))
+        size = ('≈ ' + human(f['size'])) if f['size'] else ''
+        left = '%d) ' % (i + 1) + pad('%4sp' % f['short'], 7) + pad('%d×%d' % (f['w'], f['h']), 12)
+        tail = tag + (('  ' + size) if size else '')
+        print('  ' + WHITE + left + RESET + GRAY + tail + RESET)
 
 
 def show_formats_choice(mode, default=1):
@@ -763,9 +774,8 @@ def show_formats_choice(mode, default=1):
         ('视频原画', '不转码，最快'),
     ]
     for i, (name, desc) in enumerate(items):
-        hot = ((i + 1) == default)
-        col = WHITE if hot else GRAY
-        print('  ' + col + '%d) ' % (i + 1) + name + ' · ' + desc + RESET)
+        print('  ' + WHITE + '%d) ' % (i + 1) + name + RESET +
+              GRAY + ' · ' + desc + RESET)
 
 
 def show_summary(title, res_label, mode, size):
@@ -834,9 +844,8 @@ def main():
             bad(str(e))
             continue
 
-        show_info(info)
-
         fmts = formats_of(info)
+        show_info(info, fmts)
         chosen = None
         if fmts:
             show_formats(fmts, 0)
