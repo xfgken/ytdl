@@ -1,176 +1,224 @@
 # ytdl · YouTube 下载器（Termux 版）
 
-输入链接 → 选分辨率 → 选格式 → 自动下载合并 → 成品存到下载目录。
+粘贴一个链接 → 选清晰度 → 选格式 → 自动下载 + 合并音视频 → 成品带声音存进手机下载目录。
 
-只依赖 Python 3 标准库，不需要 pip 安装任何东西。
+只依赖 **Python 3 标准库**，不需要 pip 装任何东西。作者：**by xfgken**
 
 ---
 
-## 一条命令（推荐）
+## 1. 安装（第一次，一条命令）
+
+打开 Termux，粘贴执行：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/xfgken/ytdl/main/get.sh -o "$TMPDIR/get.sh" && sh "$TMPDIR/get.sh"
 ```
 
-> 普通 Linux 把 `"$TMPDIR/get.sh"` 换成 `/tmp/get.sh` 即可。
+普通 Linux 把 `"$TMPDIR/get.sh"` 换成 `/tmp/get.sh`。
 
-这一条命令会自动完成：
+这一条命令会自动做完：装 git（如果缺）→ 把源码放到 `~/ytdl` → 装好 `ytdl` 命令 → 启动程序。
 
-1. 安装 git（如果缺）
-2. 下载（或更新）源码到 `~/ytdl`
-3. 启动脚本 —— 启动时会**先自检环境**，缺什么装什么，然后进入交互
+> 装完会顺便建一个 `ytdl` 命令，以后不用再敲这条长命令。
 
-### 想用管道写法也行
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/xfgken/ytdl/main/get.sh | sh
-```
-
-> 小知识：Termux 里的 `sh` 是 **mksh**，它逐行读取传进去的脚本。如果脚本中途做了
-> `exec < /dev/tty` 这类改动 stdin 的动作，**剩下的行就会从终端读走**，于是你敲的
-> 字被当成命令执行，出现 `sh:39: i: not found` 这种怪错。本项目已避开该坑
-> （交互输入只在最后启动程序那一步重定向）。
+**建议**：全新环境的 Termux，先跑一次 `pkg update -y && pkg upgrade -y` 再装，能避开 90% 的依赖问题。
 
 ---
 
-## 后续再启动（不用再敲长命令）
+## 2. 日常使用（命令就这几条）
 
-第一次安装时会自动装一个 `ytdl` 命令，以后直接：
-
-```sh
-ytdl                    # 进入交互
-ytdl "<链接>"           # 带上链接
-ytdl "<链接>" -y        # 全自动（默认选项）
-```
-
-如果没装上，手动加一行：
-
-```sh
-ln -sf ~/ytdl/ytdl.sh $PREFIX/bin/ytdl      # Termux
-ln -sf ~/ytdl/ytdl.sh /usr/local/bin/ytdl   # 有写入权限的 Linux
-```
-
-也可以直接：`sh ~/ytdl/ytdl.sh`
-
-> 无论哪种方式，每次启动都会先自检环境（缺什么自动装），命令可以长期一直用。
-
----
-
-## 或者分步来（Termux）
-
-```sh
-git clone https://github.com/xfgken/ytdl.git && cd ytdl
-sh install.sh     # 只装环境（可选，ytdl.sh 也会自动装）
-sh ytdl.sh        # 启动（每次都会先自检）
-
-```
-
----
-
-## 启动时都检查什么
-
-每次运行 `sh ytdl.sh` 都会先过一遍：
-
-| 检查项 | 缺失时的处理 |
-
+| 想干什么 | 命令 |
 |---|---|
+| 进入交互（最常用） | `ytdl` |
+| 带上链接直接开始 | `ytdl "https://youtu.be/xxxx"` |
+| 全自动（全部用默认选项，不用点回车） | `ytdl "链接" -y` |
+| 更新到最新版 | `cd ~/ytdl && git pull` |
+| 只装/修环境，不启动 | `sh ~/ytdl/ytdl.sh`（启动即自检）或 `sh ~/ytdl/install.sh` |
+| 换一种方式启动（没建软链接时） | `sh ~/ytdl/ytdl.sh` |
 
-| python3 | Termux 自动 `pkg install python` |
+如果 `ytdl` 命令没生效，手动建软链：
 
-| yt-dlp | Termux 自动 `pkg install yt-dlp`；Linux 自动下载对应架构二进制 |
+```sh
+ln -sf ~/ytdl/ytdl.sh $PREFIX/bin/ytdl        # Termux
+ln -sf ~/ytdl/ytdl.sh /usr/local/bin/ytdl     # 有权限的 Linux
+```
 
-| ffmpeg | Termux 自动 `pkg install ffmpeg`；Linux 用 apt |
-
-| 存储权限 | 首次运行自动调起 `termux-setup-storage` |
-
-| 成品目录 | 自动选择第一个可写目录 |
-
-检查本身只花零点几秒，不会拖慢启动。
+> 链接前后的引号建议保留 —— 有些分享链接带 `&`，不加引号会被 shell 当成后台符号。
 
 ---
 
-## 运行时的交互
+## 3. 一次下载的完整流程
+
+启动后会先自检，然后出现输入提示，粘贴链接回车即可（输入 `q` 退出）：
 
 ```
-  请粘贴视频链接（q 退出）> https://www.youtube.com/watch?v=...
+  ██╗   ██╗████████╗██████╗ ██╗  by xfgken
+  ╚██╗ ██╔╝╚══██╔══╝██╔══██╗██║
+   ╚████╔╝    ██║   ██║  ██║██║
+    ╚██╔╝     ██║   ██║  ██║██║
+     ██║      ██║   ██████╔╝███████╗
+     ╚═╝      ╚═╝   ╚═════╝ ╚══════╝
+  YouTube 下载器 · Termux 版
 
-  给老父亲气笑了 #影视 #影视混剪 #搞笑
-  笑点剧场 | 时长 0:26 | 329991 次观看
+  ✓ python 3.12.3
+  ✓ yt-dlp 2026.08.19
+  ✓ ffmpeg  /data/data/com.termux/files/home/ytdl/bin/ffmpeg
+  ✓ JS 运行时 node
+  /sdcard/Download/YouTube
+  请输入解析的链接（q 退出）> https://youtube.com/shorts/xxxx
 
-  可选分辨率：
-    1) 1080p  原生 H.264   1080x1920
-    2) 720p   原生 H.264   720x1280
-    3) 608p   需转码        608x1080
-    ...
+ 1. 开始解析
+  [youtube] Extracting URL: https://youtube.com/shorts/xxxx
+  [youtube] xxxx: Downloading webpage
+  [info] xxxx: Downloading 1 format(s): 616+251-1
+  标题：    给老父亲气笑了 #影视
+  作者：    笑点剧场
+  时长：    0:26
+  观看：    33.0 万次
+  发布：    2026-09-10
+  清晰度：  共 7 档，最高 1080p
+  1) 1080p  1080×1920   原生 H.264
+  2)  720p  720×1280    原生 H.264
+  ...
 
-  输出格式：
-    1) 视频 MP4（H.264 + AAC，手机直接能播）
-    2) 仅音频 M4A
-    3) 视频（保留原始编码，速度最快）
+ 2. 格式
+  1) 视频 MP4 · H.264 + AAC
+  2) 仅音频 M4A · 只要声音
+  3) 视频原画 · 不转码，最快
 
-  请选择分辨率 [1]: 1
-  请选择 [1]: 1
-  开始制作：视频 MP4 · 1080p
-  [############################] 100.0%
-  合并音视频…
-  ✓ 完成
-     /sdcard/Download/YouTube/标题_1080p.mp4
-     6.4 MB · 时长 0:26
-     轨道 h264,1080,1920 / aac,2
-
+ 3. 开始制作
+  视频 MP4 · 1080p
+  [download] 100.0% ...
+ ✓ 音轨正常：h264 + aac
+✓ 完成
+  给老父亲气笑了 影视_1080p.mp4
+  /sdcard/Download/YouTube
+  6.4 MB · 0:26 · h264 · 1080×1920 · aac
 ```
+
+流程里你只需要回两次车：
+
+1. **粘贴链接** → 回车（开始解析，会顺便刷出 yt-dlp 的原始日志和视频信息）
+2. **选清晰度**（回车 = 默认 1080p）→ **选格式**（回车 = 默认「视频 MP4」）
+
+想全程不回车：`ytdl "链接" -y`。
+
+三个区域的含义：
+
+| 区域 | 说明 |
+|---|---|
+| `1. 开始解析` | 取视频信息：标题/作者/时长/观看/发布/清晰度，并列出所有可选清晰度 |
+| `2. 格式` | `1` 视频 MP4（H.264+AAC，手机直接能播）；`2` 仅音频 M4A；`3` 原画不转码（最快） |
+| `3. 开始制作` | 下载 + 合并，结束后校验音轨，输出成品名、路径、体积、时长、编码 |
 
 ---
 
-## 成品保存位置
+## 4. 成品保存位置
 
-按顺序自动选择第一个可写入的目录：
+按顺序取**第一个可写**的目录：
 
-1. 环境变量 `YTDL_OUT_DIR`（如果设置了）
+1. 环境变量 `YTDL_OUT_DIR`（设置了就用它）
 2. `/sdcard/Download/YouTube`
 3. `~/storage/downloads/YouTube`（Termux 已授权存储时）
 4. `~/YouTube`
 
-文件名不以点开头，重名自动加 `_1` / `_2`，**绝不覆盖旧文件**。
+文件名不以点开头（相册能扫到），重名自动加 `_1` / `_2`，**绝不覆盖旧文件**。
 
----
-
-## 其他用法
+想强制指定目录：
 
 ```sh
-sh ytdl.sh                    # 交互式
-sh ytdl.sh "<链接>"           # 带上链接
-sh ytdl.sh "<链接>" -y        # 全部默认选项（无人值守）
-
+YTDL_OUT_DIR=/sdcard/Movies ytdl "链接"
 ```
 
 ---
 
-## 文件说明
+## 5. 启动时自检了什么
 
-| 文件 | 作用 |
+每次运行都会先过一遍（只花零点几秒）：
 
+| 检查项 | 缺失时的处理 |
 |---|---|
+| python3 | Termux 自动 `pkg install python`；Linux 用 apt |
+| yt-dlp | Termux 自动 `pkg install yt-dlp`；Linux 自动下载对应架构二进制 |
+| ffmpeg | 优先用项目 `bin/ffmpeg` → Termux `pkg install ffmpeg` → 自动下载**静态版**（自带库，绕开 Termux 库错位） |
+| JS 运行时 | 检查 deno / node / qjs / bun，一个都没有会给出安装建议 |
+| 存储权限 | 首次运行自动调起 `termux-setup-storage` |
+| 成品目录 | 自动挑第一个可写目录 |
 
-| `ytdl.sh` | 启动入口（Termux 里缺依赖会自动装） |
-
-| `ytdl.py` | 交互主程序：解析、选分辨率、选格式、下载合并、命名 |
-
-| `install.sh` | 只装环境：python、ffmpeg、yt-dlp、存储权限 |
-
-| `bin/` | 可选：自带引擎放这里（优先使用，仓库不收录） |
+自检里 `✓` 是就位、`✗` 是没就位（会同时给出修复提示）。
 
 ---
 
-## 常见问题
+## 6. 常见问题
 
-**Q：提示找不到 yt-dlp？**
-A：执行 `sh install.sh`，或 `pkg install yt-dlp ffmpeg`。
+**Q：下载出来有画面没声音？**
+
+A：两种原因。①音轨是 opus 塞进 mp4（安卓放不出声）—— 本程序会在完成后自动检测并只转音频（不重编码视频）修好；②你的 ffmpeg 坏了，导致根本合不出音轨 —— 启动自检的 `ffmpeg` 那一行如果是 `✗`，说明就是它，程序会自动尝试重装，不行就用自带的静态 ffmpeg。
+
+**Q：Termux 里 `pkg upgrade` 报错 / ffmpeg 装了跑不起来（`CANNOT LINK EXECUTABLE`）？**
+
+A：这是 Termux 仓库里 `libplacebo` 和 `libc++` 版本错位导致的，而且坏 ffmpeg 会让 dpkg 卡在半配置状态。修复顺序（先卸载再升级，顺序不能反）：
+
+```sh
+pkg uninstall -y ffmpeg
+apt --fix-broken install -y
+dpkg --configure -a
+pkg upgrade -y
+pkg install -y ffmpeg
+ffmpeg -version
+```
+
+跑完还是不行，直接让 ytdl 走自带静态版（启动自检会自动做，或手动）：程序会把 `bin/ffmpeg` 当作首选，不参与 Termux 的动态链接。
+
+**Q：日志里有 `缺少 JS 运行时（deno）` 提示？**
+
+A：不影响下载。想消掉提示：`pkg install deno`，或改用已安装的 node（yt-dlp 需要显式指定运行时时才用）。
 
 **Q：相册看不到成品？**
-A：成品默认在 `/sdcard/Download/YouTube`，Termux 需先 `termux-setup-storage` 授权；
-若授权使用了 `~/storage/downloads/YouTube`，那就是手机共享存储的“下载”目录。
 
-**Q：1080p 为什么不是一条流的直链？**
-A：YouTube 对 720p 以上采用音视频分离流，脚本会自动下载两条流并用 ffmpeg 合并成
-H.264 + AAC 单文件，所以成片是带声音的。
+A：成品默认在 `/sdcard/Download/YouTube`。Termux 需要先 `termux-setup-storage` 授权，授权后也可能落在 `~/storage/downloads/YouTube`（就是手机「下载」目录）。
+
+**Q：1080p 为什么不是一条直链？**
+
+A：YouTube 720p 以上是音视频分离流，程序会下载两条流并用 ffmpeg 合并成 H.264 + AAC 单文件，所以成片带声音。
+
+**Q：提示 `Requested format is not available`？**
+
+A：同样是 ffmpeg 不可用时的连锁反应（拿不到可合并的组合）。先在自检里把 ffmpeg 修好即可。
+
+**Q：终端颜色乱码 / 显示错位？**
+
+A：颜色只在真正的终端里启用；如果被重定向到文件或管道，会自动关掉颜色，不会有杂码。
+
+---
+
+## 7. 卸载
+
+```sh
+rm -f $PREFIX/bin/ytdl        # 删命令
+rm -rf ~/ytdl                 # 删程序（成品在下载目录，不受影响）
+```
+
+---
+
+## 8. 文件说明
+
+| 文件 | 作用 |
+|---|---|
+| `get.sh` | 一条命令入口：装 git、拉源码、建 `ytdl` 命令、启动 |
+| `ytdl.sh` | 启动器：每次运行先自检环境，缺什么装什么，然后启动 `ytdl.py` |
+| `ytdl.py` | 交互主程序：解析、清晰度/格式选择、下载合并、音轨校验、命名 |
+| `install.sh` | 只装环境（python / ffmpeg / yt-dlp / 存储权限） |
+| `bin/` | 可选：自带引擎放这里（优先使用；仓库不收录） |
+
+---
+
+## 9. 给想改代码的人
+
+- 显示层是集中写的：`section()`（区域标题 + `1. 2. 3.` 序号）、`raw_line()`（透传工具原始输出）、`show_info()`（带标签的视频信息）、`show_formats()`（清晰度列表）、`prog_show()`（进度条）。
+- 颜色常量在文件顶部：`ACC` 品红（主色）、`ACC_D` 深品红、`GRAY` 次要、`GREEN` 就位/成功、`RED` 错误。非 TTY 自动全部关闭。
+- 改完自测：
+  ```sh
+  python3 -m py_compile ytdl.py
+  sh -n ytdl.sh
+  ytdl "https://youtu.be/xxxx" -y
+  ```

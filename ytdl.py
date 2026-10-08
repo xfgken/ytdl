@@ -96,18 +96,15 @@ def out(m=''):
     print(m)
 
 
-CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩'
 _SEC_N = [0]
 
 
 def section(title):
-    """区域：圆序号 + 标题（每轮从 ① 重新开始）"""
+    """区域：数字序号 + 标题（每轮从 1. 重新开始）"""
     if title == '开始解析':
         _SEC_N[0] = 0
     _SEC_N[0] += 1
-    n = _SEC_N[0]
-    mark = CIRCLED[n - 1] if 1 <= n <= len(CIRCLED) else str(n)
-    print(BOLD + ACC + ' ' + mark + ' ' + title + RESET)
+    print(BOLD + ACC + ' %d. %s' % (_SEC_N[0], title) + RESET)
 
 
 def clear_line():
