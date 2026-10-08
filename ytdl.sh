@@ -19,6 +19,43 @@ if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ]; then is_termux=1; fi
 
 have() { command -v "$1" >/dev/null 2>&1; }
 say()  { printf '%s\n' "$*"; }
+
+fix_mirror() {
+  # 软件源被限流(429)/未签名时，自动换到可用镜像再试
+  [ -n "${PREFIX:-}" ] || return 1
+  SL="$PREFIX/etc/apt/sources.list"
+  [ -f "$SL" ] || return 1
+  [ -f "$SL.ytdl.bak" ] || cp "$SL" "$SL.ytdl.bak" 2>/dev/null || true
+  SD="$PREFIX/etc/apt/sources.list.d"
+  if [ -d "$SD" ]; then
+    for f in "$SD"/*.sources "$SD"/*.list; do
+      [ -e "$f" ] || continue
+      mv "$f" "$f.ytdl.off" 2>/dev/null || true
+    done
+  fi
+  for M in \
+    https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main \
+    https://mirrors.ustc.edu.cn/termux/apt/termux-main \
+    https://mirrors.aliyun.com/termux/apt/termux-main \
+    https://packages.termux.dev/apt/termux-main
+  do
+    printf 'deb %s stable main\n' "$M" > "$SL" 2>/dev/null || return 1
+    say "  试用镜像：$M"
+    if pkg update -y </dev/null >/dev/null 2>&1; then
+      say '  已切换到可用镜像'
+      return 0
+    fi
+  done
+  cp "$SL.ytdl.bak" "$SL" 2>/dev/null || true
+  if [ -d "$SD" ]; then
+    for f in "$SD"/*.ytdl.off; do
+      [ -e "$f" ] || continue
+      mv "$f" "${f%.ytdl.off}" 2>/dev/null || true
+    done
+  fi
+  say '  所有镜像都不通，已还原原来的源'
+  return 1
+}
 # 就位状态统一由 ytdl.py 展示，这里成功项静默
 ok()   { :; }
 bad()  { printf '  \033[33m✗\033[0m %s\n' "$*"; }
@@ -124,7 +161,14 @@ if [ "$need_work" = '1' ]; then
       pkg update -y >/dev/null 2>&1 || true
       # shellcheck disable=SC2086
       if ! pkg install -y $missing </dev/null; then
-        say '自动安装失败，请手动执行：  pkg install python ffmpeg yt-dlp'
+        say '安装失败（常见：官方镜像 429 / 未签名），自动换个源再试…'
+        if fix_mirror; then
+          pkg update -y >/dev/null 2>&1 || true
+          # shellcheck disable=SC2086
+          pkg install -y $missing </dev/null || say '自动安装失败，请手动换源后执行：  pkg install python ffmpeg yt-dlp'
+        else
+          say '自动安装失败，请手动换源后执行：  pkg install python ffmpeg yt-dlp'
+        fi
       fi
     fi
     if [ "$JS_MISSING" = '1' ]; then

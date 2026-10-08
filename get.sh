@@ -17,6 +17,43 @@ DIR="${YTDL_DIR:-$HOME/ytdl}"
 have() { command -v "$1" >/dev/null 2>&1; }
 say()  { printf '%s\n' "$*"; }
 
+fix_mirror() {
+  # 软件源被限流(429)/未签名时，自动换到可用镜像再试
+  [ -n "${PREFIX:-}" ] || return 1
+  SL="$PREFIX/etc/apt/sources.list"
+  [ -f "$SL" ] || return 1
+  [ -f "$SL.ytdl.bak" ] || cp "$SL" "$SL.ytdl.bak" 2>/dev/null || true
+  SD="$PREFIX/etc/apt/sources.list.d"
+  if [ -d "$SD" ]; then
+    for f in "$SD"/*.sources "$SD"/*.list; do
+      [ -e "$f" ] || continue
+      mv "$f" "$f.ytdl.off" 2>/dev/null || true
+    done
+  fi
+  for M in \
+    https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main \
+    https://mirrors.ustc.edu.cn/termux/apt/termux-main \
+    https://mirrors.aliyun.com/termux/apt/termux-main \
+    https://packages.termux.dev/apt/termux-main
+  do
+    printf 'deb %s stable main\n' "$M" > "$SL" 2>/dev/null || return 1
+    say "  试用镜像：$M"
+    if pkg update -y </dev/null >/dev/null 2>&1; then
+      say '  已切换到可用镜像'
+      return 0
+    fi
+  done
+  cp "$SL.ytdl.bak" "$SL" 2>/dev/null || true
+  if [ -d "$SD" ]; then
+    for f in "$SD"/*.ytdl.off; do
+      [ -e "$f" ] || continue
+      mv "$f" "${f%.ytdl.off}" 2>/dev/null || true
+    done
+  fi
+  say '  所有镜像都不通，已还原原来的源'
+  return 1
+}
+
 say ''
 say '=== ytdl 一条命令安装 ==='
 say ''
@@ -27,7 +64,18 @@ if have git; then
 else
   if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ]; then
     say '[1/3] 安装 git…'
-    pkg install -y git </dev/null || { say 'git 安装失败，请手动执行： pkg install git'; exit 1; }
+    if ! pkg install -y git </dev/null; then
+      say '        源不通（常见：官方镜像 429 / 未签名），自动换个源再试…'
+      if fix_mirror && pkg install -y git </dev/null; then
+        :
+      else
+        say ''
+        say '无法自动装上 git。请手动换源后重试安装：'
+        say '  termux-change-repo                # 选 Mirror group → 挑一个（如 Tsinghua / USTC）'
+        say '  pkg update -y && pkg install -y git'
+        exit 1
+      fi
+    fi
   else
     say '[1/3] 未找到 git，请先安装（apt install git）'
     exit 1

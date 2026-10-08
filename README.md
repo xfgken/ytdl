@@ -154,6 +154,17 @@ YTDL_OUT_DIR=/sdcard/Movies ytdl "链接"
 
 A：两种原因。①音轨是 opus 塞进 mp4（安卓放不出声）—— 本程序会在完成后自动检测并只转音频（不重编码视频）修好；②你的 ffmpeg 坏了，导致根本合不出音轨 —— 启动自检的 `ffmpeg` 那一行如果是 `✗`，说明就是它，程序会自动尝试重装，不行就用自带的静态 ffmpeg。
 
+**Q：安装时报 `429 Too Many Requests` 或 `repository ... is not signed`？**
+
+A：这是 Termux 官方镜像被限流（或临时未签名），跟你手机无关。新版 `get.sh` / `ytdl.sh` 遇到这种情况会**自动依次切换清华 / 中科大 / 阿里镜像再重试**，原来的源会备份在 `$PREFIX/etc/apt/sources.list.ytdl.bak`。
+
+也可以手动换（推荐国内源）：
+
+```sh
+termux-change-repo                    # 选 Mirror group → 挑 Tsinghua 或 USTC
+pkg update -y && pkg install -y git
+```
+
 **Q：Termux 里 `pkg upgrade` 报错 / ffmpeg 装了跑不起来（`CANNOT LINK EXECUTABLE`）？**
 
 A：这是 Termux 仓库里 `libplacebo` 和 `libc++` 版本错位导致的，而且坏 ffmpeg 会让 dpkg 卡在半配置状态。修复顺序（先卸载再升级，顺序不能反）：
