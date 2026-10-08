@@ -44,6 +44,18 @@ else
   git clone --depth 1 "$REPO" "$DIR" || { say '下载失败，请检查网络后重试'; exit 1; }
 fi
 
+# 2.5) 安装 `ytdl` 命令，以后直接敲 ytdl 就行
+if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
+  if ln -sf "$DIR/ytdl.sh" "$PREFIX/bin/ytdl" 2>/dev/null; then
+    chmod 755 "$PREFIX/bin/ytdl" 2>/dev/null || true
+    say "        以后直接敲： ytdl"
+  fi
+elif [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+  if ln -sf "$DIR/ytdl.sh" /usr/local/bin/ytdl 2>/dev/null; then
+    say "        以后直接敲： ytdl"
+  fi
+fi
+
 # 3) 启动
 say "[3/3] 启动（缺什么会自动装）"
 exec sh "$DIR/ytdl.sh" "$@"

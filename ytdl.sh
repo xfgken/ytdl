@@ -2,7 +2,16 @@
 # ytdl · 启动器
 # 每次运行先自检环境（python / yt-dlp / ffmpeg / 存储权限），缺什么自动装，然后启动
 set -u
-cd "$(dirname "$0")" || exit 1
+# 解析脚本真实位置（兼容软链接，例如直接敲 `ytdl` 命令时）
+SELF="$0"
+while [ -L "$SELF" ]; do
+  L=$(readlink "$SELF")
+  case "$L" in
+    /*) SELF="$L" ;;
+    *) SELF="$(dirname "$SELF")/$L" ;;
+  esac
+done
+cd "$(dirname "$SELF")" || exit 1
 
 is_termux=0
 if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ]; then is_termux=1; fi

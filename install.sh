@@ -58,5 +58,11 @@ else
   echo "  python : 未找到"
 fi
 echo
-echo "完成。启动：  sh ytdl.sh"
+if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
+  ln -sf "$(pwd)/ytdl.sh" "$PREFIX/bin/ytdl" 2>/dev/null && chmod 755 "$PREFIX/bin/ytdl" 2>/dev/null && echo "  已安装命令：ytdl"
+elif [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+  ln -sf "$(pwd)/ytdl.sh" /usr/local/bin/ytdl 2>/dev/null && echo "  已安装命令：ytdl"
+fi
+
+echo "完成。启动：  ytdl   （或 sh ytdl.sh）"
 echo

@@ -21,6 +21,29 @@ curl -fsSL https://raw.githubusercontent.com/xfgken/ytdl/main/get.sh | sh
 
 ---
 
+## 后续再启动（不用再敲长命令）
+
+第一次安装时会自动装一个 `ytdl` 命令，以后直接：
+
+```sh
+ytdl                    # 进入交互
+ytdl "<链接>"           # 带上链接
+ytdl "<链接>" -y        # 全自动（默认选项）
+```
+
+如果没装上，手动加一行：
+
+```sh
+ln -sf ~/ytdl/ytdl.sh $PREFIX/bin/ytdl      # Termux
+ln -sf ~/ytdl/ytdl.sh /usr/local/bin/ytdl   # 有写入权限的 Linux
+```
+
+也可以直接：`sh ~/ytdl/ytdl.sh`
+
+> 无论哪种方式，每次启动都会先自检环境（缺什么自动装），命令可以长期一直用。
+
+---
+
 ## 或者分步来（Termux）
 
 ```sh
