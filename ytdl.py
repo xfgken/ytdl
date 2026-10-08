@@ -96,17 +96,18 @@ def out(m=''):
     print(m)
 
 
-def hr():
-    """满宽虚线，用来分隔大区域"""
-    w = term_width()
-    n = max(4, (w - 2) // 2)
-    print(ACC_D + ' ' + '─ ' * n + RESET)
+CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩'
+_SEC_N = [0]
 
 
 def section(title):
-    """区域：一条长虚线 + 区域标题"""
-    hr()
-    print(BOLD + ACC + ' ' + title + RESET)
+    """区域：圆序号 + 标题（每轮从 ① 重新开始）"""
+    if title == '开始解析':
+        _SEC_N[0] = 0
+    _SEC_N[0] += 1
+    n = _SEC_N[0]
+    mark = CIRCLED[n - 1] if 1 <= n <= len(CIRCLED) else str(n)
+    print(BOLD + ACC + ' ' + mark + ' ' + title + RESET)
 
 
 def clear_line():
@@ -754,7 +755,6 @@ def show_banner(ytver, ff_ok, ffpath, out_dir):
         tail = ('  ' + ACC + sign + RESET) if w >= 26 else ''
         print('  ' + BOLD + ACC + 'ytdl' + RESET + tail)
     print('  ' + GRAY + 'YouTube 下载器 · Termux 版' + RESET)
-    hr()
 
 
 def show_checks(ytver, ff_ok, ffpath, out_dir):
@@ -979,7 +979,7 @@ def main():
                 continue
 
         # ---------- 制作（原样流式） ----------
-        section('制作')
+        section('开始制作')
         print(GRAY + '  ' + title_show + RESET)
 
         state = {'cur': '视频流' if fmt_mode != 2 else '音频流',
@@ -1086,7 +1086,6 @@ def main():
 
         # ---------- 完成 ----------
         size = os.path.getsize(dst)
-        hr()
         print(GREEN + '✓ 完成' + RESET)
         bullet(os.path.basename(dst), hot=True)
         bullet(os.path.dirname(dst))
