@@ -184,7 +184,9 @@ YTDL_COOKIES=/sdcard/Download/cookies.txt ytdl "链接"
 4. 打开扩展 → **Export** → 导出 `cookies.txt`
 5. 把文件保存/移动到 `/sdcard/Download/cookies.txt`（文件名保持 `cookies.txt`）
 
-> cookies 有有效期（通常几周到几个月），过期了就重新导出一次。启动画面里如果多出一行 `cookies /sdcard/Download/cookies.txt`，说明已经被识别到了。
+> cookies 有有效期（通常几周到几个月），过期了就重新导出一次。启动画面里如果多出一行 `cookies /sdcard/Download/cookies.txt`，说明已经被识别到了。想看当前状态可以运行： `ytdl cookies`
+
+> ⚠️ **cookies 必须每个人用「自己的账号」导出**：不要提交到仓库、不要发给别人、不要传网盘 —— 它等于你 YouTube 账号的钥匙；多人共用一份 cookies（尤其是不同 IP），会被 Google 判为异常登录，很快一起失效。仓库的 `.gitignore` 已经忽略 `cookies.txt`，防止误提交。
 
 **② 换个网络再试**
 
@@ -193,6 +195,22 @@ Wi-Fi ⇄ 手机流量切换，或重启路由器换 IP，风控常常是临时�
 **③ 装上 JS 运行时**
 
 `pkg install -y deno`（yt-dlp 官方推荐的 JavaScript 运行时）。若只有 node，脚本会自动加 `--js-runtimes node`，但 deno 更稳，能减少风控触发。
+
+**Q：能不能把 `cookies.txt` 一起打包/提交，让别人下载我的源码后直接用？**
+
+A：**不行，也不建议**，原因有三：
+
+1. 它是你账号的**登录凭据**（里面就是你的登录态），公开出去等于把 YouTube 账号交出去；
+2. 多人共用同一份 cookies、尤其是从不同 IP 访问，Google 会直接判定**异常登录** → 会话被注销，你自己也用不了；
+3. GitHub 是公开仓库，爬虫会扫到这类文件。
+
+正确的做法：**每个使用者自己导出一次**（1 分钟，见上一条），放到 `/sdcard/Download/cookies.txt` 即可，`ytdl` 会自动识别。检查自己是否就绪：
+
+```sh
+ytdl cookies
+```
+
+仓库侧已经做了两层保护：`.gitignore` 忽略 `cookies.txt`（防止误提交），程序内没找到 cookies 时会在自检里明确提示并打印导出指引。
 
 **Q：安装时报 `429 Too Many Requests` 或 `repository ... is not signed`？**
 

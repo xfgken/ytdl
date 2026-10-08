@@ -4,3 +4,5 @@ bin/
 *.mp4
 *.m4a
 .ytdl-work/
+cookies.txt
+**/cookies.txt

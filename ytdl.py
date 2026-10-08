@@ -693,6 +693,31 @@ def guide_bot(err):
     print()
 
 
+def print_cookie_help():
+    """`ytdl cookies`：看状态 + 教怎么导出自己的 cookies。"""
+    c = pick_cookies()
+    print()
+    print(' ' + BOLD + ACC + 'cookies' + RESET)
+    print()
+    if c:
+        print(' ' + GREEN + '✓ 已找到：' + RESET + c)
+        print('  ' + GRAY + 'ytdl 会自动带上它，不用加任何参数。' + RESET)
+    else:
+        print(' ' + YELLOW + '✗ 还没有找到 cookies.txt' + RESET)
+        print('  ' + GRAY + '不带 cookies 时，YouTube 常会要求“确认你不是机器人”。' + RESET)
+    print()
+    print('  ' + GRAY + '导出自己的 cookies（1 分钟）：' + RESET)
+    print('  ' + GRAY + '1) 装 Kiwi Browser，加扩展 “Get cookies.txt LOCALLY”' + RESET)
+    print('  ' + GRAY + '2) 打开 youtube.com 并登录，用扩展导出 cookies.txt' + RESET)
+    print('  ' + GRAY + '3) 把文件放到 /sdcard/Download/cookies.txt' + RESET)
+    print()
+    print('  ' + GRAY + '也可以手动指定： ytdl --cookies <路径> "链接"' + RESET)
+    print('  ' + GRAY + '或设环境变量： YTDL_COOKIES=<路径> ytdl "链接"' + RESET)
+    print()
+    print('  ' + YELLOW + '注意：cookies 等于你账号的钥匙 —— 别提交到仓库，也别分享给别人。' + RESET)
+    print()
+
+
 def probe_stream(yt, url):
     """解析视频信息：把 yt-dlp 的原始输出直接流式显示出来。"""
     buf = []
@@ -929,6 +954,9 @@ def main():
             del args[i]
             break
     url_arg = args[0] if args else ''
+    if url_arg in ('cookies', 'cookie', '--cookies-help'):
+        print_cookie_help()
+        return 0
 
     global COOKIES, _JS_ARGS
     COOKIES = pick_cookies()
@@ -957,6 +985,9 @@ def main():
     show_checks(vtxt, FF_OK, ff, out_dir)
     if COOKIES:
         print('  ' + GRAY + 'cookies ' + COOKIES + RESET)
+    else:
+        print('  ' + YELLOW + 'cookies 未提供（YouTube 要求验证时会失败，运行 ytdl cookies 看指引）'
+              + RESET)
 
     while True:
         if auto and not url_arg:
