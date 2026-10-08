@@ -233,6 +233,39 @@ def mp4_info(path):
     return None, None
 
 
+def pick_ffmpeg():
+    """挑一个真能跑的 ffmpeg：项目 bin/ 优先（静态版不受 Termux 库问题影响），其次系统。"""
+    base = os.path.dirname(os.path.abspath(__file__))
+    cands = [os.path.join(base, 'bin', 'ffmpeg')]
+    w = shutil.which('ffmpeg')
+    if w:
+        cands.append(w)
+    cands.append('/usr/bin/ffmpeg')
+    for c in cands:
+        if not os.path.exists(c):
+            continue
+        rc, t = run_capture([c, '-version'], 60)
+        low = t.lower()
+        if 'version' in low and 'cannot link' not in low:
+            return c, True
+    return cands[0], False
+
+
+def pick_ffprobe(ffpath):
+    """挑一个 ffprobe：项目 bin/ 优先，其次系统。"""
+    base = os.path.dirname(os.path.abspath(__file__))
+    cands = [os.path.join(base, 'bin', 'ffprobe')]
+    w = shutil.which('ffprobe')
+    if w:
+        cands.append(w)
+    if ffpath:
+        cands.append(os.path.join(os.path.dirname(ffpath), 'ffprobe'))
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    return ''
+
+
 def media_info(path, ffprobe, ffmpeg):
     """读取成品里的视频/音频编码。
     优先用纯 Python 解析 mp4 容器（Termux 里 ffprobe/ffmpeg 可能因库版本错位跑不起来），
@@ -390,13 +423,8 @@ def main():
     url_arg = args[0] if args else ''
 
     yt = shutil.which('yt-dlp') or '/usr/local/bin/yt-dlp'
-    ff = shutil.which('ffmpeg') or '/usr/bin/ffmpeg'
     # 实测 ffmpeg 能不能跑：Termux 里常见“装了但库版本错位”，此时合并会失败 → 成品没声音
-    FF_OK = False
-    if shutil.which('ffmpeg') or os.path.exists(ff):
-        rc_f, t_f = run_capture([ff, '-version'], 60)
-        low = t_f.lower()
-        FF_OK = ('version' in low) and ('cannot link' not in low)
+    ff, FF_OK = pick_ffmpeg()
     if not shutil.which('yt-dlp') and not os.path.exists(yt):
         bad('未找到 yt-dlp，请先运行：  sh install.sh')
         return 1
@@ -434,6 +462,11 @@ def main():
         url_arg = ''
         if not url or url.lower() in ('q', 'quit', 'exit'):
             break
+        if ' ' in url.strip():
+            warn('这看起来不是视频链接（里面有空格）—— 要执行终端命令，'
+                 '请先输入 q 退出本程序。')
+            print()
+            continue
 
         print()
         print(DIM + '  正在解析，请稍候…' + RESET)
@@ -596,11 +629,7 @@ def main():
                 break
 
         # ---- 成品校验：必须有音轨，而且音频要手机能播 ----
-        fp_path = shutil.which('ffprobe') or ''
-        if not fp_path:
-            cand2 = os.path.join(os.path.dirname(ff), 'ffprobe')
-            if os.path.exists(cand2):
-                fp_path = cand2
+        fp_path = pick_ffprobe(ff)
         vcodec, acodec = media_info(src, fp_path, ff)
         if not (vcodec or acodec):
             warn('检测不到音轨信息（ffprobe / ffmpeg 都不可用）'
@@ -648,8 +677,8 @@ def main():
         print('     ' + DIM + human(size) + ' · 时长 ' + dur(info.get('duration')) + RESET)
         if acodec:
             print('     ' + DIM + '音轨 ' + str(vcodec or '?') + ' + ' + str(acodec) + RESET)
-        fp = shutil.which('ffprobe')
-        if fp:
+        fp = fp_path
+        if fp and os.path.exists(fp):
             rc2, t2 = run_capture([fp, '-v', 'error', '-show_entries',
                                     'stream=codec_name,width,height,channels', '-of', 'csv=p=0', dst], 60)
             if t2.strip() and 'CANNOT LINK' not in t2 and 'not found' not in t2:
