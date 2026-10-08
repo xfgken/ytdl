@@ -13,23 +13,92 @@ ytdl · Termux 版 YouTube 下载器
 import glob
 import json
 import os
+import queue
+import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
+import unicodedata
 
+# ---------------- 颜色（管道/日志场景自动关闭） ----------------
 ESC = chr(27)
 BOLD = ESC + '[1m'
 DIM = ESC + '[2m'
-GREEN = ESC + '[32m'
-YELLOW = ESC + '[33m'
-RED = ESC + '[31m'
-CYAN = ESC + '[36m'
+GREEN = ESC + '[92m'
+YELLOW = ESC + '[93m'
+RED = ESC + '[91m'
+CYAN = ESC + '[96m'
+MAGENTA = ESC + '[95m'
+BLUE = ESC + '[94m'
+WHITE = ESC + '[97m'
+GRAY = ESC + '[90m'
 RESET = ESC + '[0m'
+
+
+def _init_colors():
+    global BOLD, DIM, GREEN, YELLOW, RED, CYAN, MAGENTA, BLUE, WHITE, GRAY, RESET
+    if sys.stdout.isatty():
+        return
+    BOLD = DIM = GREEN = YELLOW = RED = CYAN = MAGENTA = BLUE = WHITE = GRAY = RESET = ''
+
+
+_init_colors()
+TTY = sys.stdout.isatty()
+KILL = ESC + '[K' if TTY else ''          # 清到行尾
+
+FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+# ---------------- 显示原语 ----------------
+
+
+def term_width(default=80):
+    try:
+        return max(40, shutil.get_terminal_size((default, 24)).columns)
+    except Exception:
+        return default
+
+
+def dwidth(s):
+    n = 0
+    for ch in s:
+        n += 2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1
+    return n
+
+
+def wrap(s, limit):
+    out = []
+    cur = ''
+    w = 0
+    for ch in s:
+        cw = 2 if unicodedata.east_asian_width(ch) in ('W', 'F') else 1
+        if w + cw > limit and cur:
+            out.append(cur)
+            cur = ''
+            w = 0
+        cur += ch
+        w += cw
+    if cur:
+        out.append(cur)
+    return out or ['']
+
+
+def pad(s, target):
+    return s + ' ' * max(0, target - dwidth(s))
 
 
 def out(m=''):
     print(m)
+
+
+def section(num, title):
+    """分区标题：── ① 解析视频 ─────────────"""
+    w = term_width()
+    head = '%s %s' % (num, title)
+    line = '─' * max(4, w - dwidth(head) - 5)
+    print()
+    print(' ' + CYAN + '──' + RESET + ' ' + BOLD + head + RESET + ' ' + GRAY + line + RESET)
 
 
 def head(m):
@@ -37,15 +106,90 @@ def head(m):
 
 
 def ok(m):
-    print(GREEN + '  ✓ ' + RESET + m)
+    print(' ' + GREEN + '✓' + RESET + ' ' + m)
 
 
 def warn(m):
-    print(YELLOW + '  ! ' + RESET + m)
+    print(' ' + YELLOW + '!' + RESET + ' ' + YELLOW + m + RESET)
 
 
 def bad(m):
-    print(RED + '  ✗ ' + m + RESET)
+    print(' ' + RED + '✗' + RESET + ' ' + RED + m + RESET)
+
+
+_ONCE = set()
+
+
+def warn_once(key, msg):
+    if key in _ONCE:
+        return
+    _ONCE.add(key)
+    warn(msg)
+
+
+def note(m):
+    print(' ' + GRAY + m + RESET)
+
+
+def bullet(m, hot=False):
+    """左侧竖线卡片行：重点亮白加粗，次要灰色"""
+    mark = CYAN + '▌' + RESET
+    body = (BOLD + WHITE + m + RESET) if hot else (GRAY + m + RESET)
+    print(' ' + mark + ' ' + body)
+
+
+_spin = {'i': 0}
+
+
+def spin_step(text, extra=''):
+    """原地转 spinner（非终端不刷屏）"""
+    if not TTY:
+        return
+    _spin['i'] += 1
+    line = ' ' + CYAN + FRAMES[_spin['i'] % len(FRAMES)] + RESET + ' ' + text
+    if extra:
+        line += ' ' + DIM + extra + RESET
+    sys.stdout.write('\r' + KILL + line)
+    sys.stdout.flush()
+
+
+def spin_done(text=''):
+    if not TTY:
+        if text:
+            print(text)
+        return
+    if text:
+        sys.stdout.write('\r' + KILL + text + '\n')
+    else:
+        sys.stdout.write('\r' + KILL)
+    sys.stdout.flush()
+
+
+def bar(pct, width=22):
+    pct = max(0.0, min(100.0, float(pct)))
+    fill = int(round(width * pct / 100.0))
+    return GREEN + '█' * fill + GRAY + '░' * (width - fill) + RESET
+
+
+def prog_show(label, pct, info=''):
+    if not TTY:
+        return
+    line = ' ' + label + ' ' + bar(pct) + ' ' + WHITE + '%5.1f%%' % pct + RESET
+    if info:
+        line += ' ' + GRAY + info + RESET
+    sys.stdout.write('\r' + KILL + line)
+    sys.stdout.flush()
+
+
+def prog_finish(text, plain=None):
+    if TTY:
+        sys.stdout.write('\r' + KILL + text + '\n')
+        sys.stdout.flush()
+    elif plain:
+        print(plain)
+
+
+# ---------------- 小工具 ----------------
 
 
 def human(n):
@@ -72,6 +216,37 @@ def dur(sec):
     return '%d:%02d' % (m, s)
 
 
+def viewers(n):
+    try:
+        n = int(n)
+    except Exception:
+        return '-'
+    if n >= 100000000:
+        return '%.1f 亿' % (n / 100000000.0)
+    if n >= 10000:
+        return '%.1f 万' % (n / 10000.0)
+    return str(n)
+
+
+def pretty_date(v):
+    d = str(v or '')
+    if len(d) == 8 and d.isdigit():
+        return '%s-%s-%s' % (d[:4], d[4:6], d[6:8])
+    return d
+
+
+def fmt_size_and_speed(size, speed):
+    parts = []
+    if size:
+        parts.append(size)
+    if speed:
+        parts.append(speed)
+    return ' · '.join(parts)
+
+
+# ---------------- 子进程 ----------------
+
+
 def run_capture(args, timeout=300):
     try:
         p = subprocess.run(args, capture_output=True, timeout=timeout)
@@ -92,6 +267,45 @@ def run_stream(args, on_line=None):
             on_line(line)
     p.wait()
     return p.returncode
+
+
+def run_stream_tick(args, on_line=None, tick=None, interval=0.12, timeout=None):
+    """逐行读输出；空闲时调用 tick() 转 spinner。timeout 单位秒。"""
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, errors='replace', bufsize=1)
+    q = queue.Queue()
+
+    def reader():
+        try:
+            for line in p.stdout:
+                q.put(line.rstrip())
+        finally:
+            q.put(None)
+
+    threading.Thread(target=reader, daemon=True).start()
+    start = time.time()
+    while True:
+        try:
+            line = q.get(timeout=interval)
+        except queue.Empty:
+            if timeout and (time.time() - start) > timeout:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+                return -1
+            if tick:
+                tick(time.time() - start)
+            continue
+        if line is None:
+            break
+        if on_line:
+            on_line(line)
+    p.wait()
+    return p.returncode
+
+
+# ---------------- 路径与命名 ----------------
 
 
 def pick_out_dir():
@@ -138,8 +352,10 @@ def unique_path(d, base, ext):
     return p
 
 
+# ---------------- mp4 容器解析（不依赖 ffprobe） ----------------
+
+
 def _boxes(buf, start, end):
-    """枚举 [start, end) 范围内的 mp4 box：(type, payload_start, payload_end)"""
     i = start
     out = []
     while i + 8 <= end:
@@ -209,8 +425,8 @@ def mp4_info(path):
     chunks = []
     try:
         with open(path, 'rb') as f:
-            head = f.read(4 * 1024 * 1024)
-            chunks.append(head)
+            head_buf = f.read(4 * 1024 * 1024)
+            chunks.append(head_buf)
             if size > 8 * 1024 * 1024:
                 f.seek(size - 4 * 1024 * 1024)
                 chunks.append(f.read())
@@ -233,8 +449,11 @@ def mp4_info(path):
     return None, None
 
 
+# ---------------- ffmpeg / ffprobe 挑选 ----------------
+
+
 def pick_ffmpeg():
-    """挑一个真能跑的 ffmpeg：项目 bin/ 优先（静态版不受 Termux 库问题影响），其次系统。"""
+    """项目 bin/ 优先（静态版不受 Termux 库问题影响），其次系统。"""
     base = os.path.dirname(os.path.abspath(__file__))
     cands = [os.path.join(base, 'bin', 'ffmpeg')]
     w = shutil.which('ffmpeg')
@@ -252,7 +471,6 @@ def pick_ffmpeg():
 
 
 def pick_ffprobe(ffpath):
-    """挑一个 ffprobe：项目 bin/ 优先，其次系统。"""
     base = os.path.dirname(os.path.abspath(__file__))
     cands = [os.path.join(base, 'bin', 'ffprobe')]
     w = shutil.which('ffprobe')
@@ -267,16 +485,13 @@ def pick_ffprobe(ffpath):
 
 
 def media_info(path, ffprobe, ffmpeg):
-    """读取成品里的视频/音频编码。
-    优先用纯 Python 解析 mp4 容器（Termux 里 ffprobe/ffmpeg 可能因库版本错位跑不起来），
-    解析不到再退回 ffprobe / ffmpeg。返回 (vcodec, acodec)，检测不到返回 (None, None)。"""
+    """优先纯 Python 解析 mp4；再退 ffprobe / ffmpeg。返回 (vcodec, acodec)。"""
     ext = os.path.splitext(str(path))[1].lower()
     if ext in ('.mp4', '.m4a', '.mov'):
         v0, a0 = mp4_info(path)
         if v0 or a0:
             return v0, a0
     if ffprobe and os.path.exists(ffprobe):
-
         rc, t = run_capture([ffprobe, '-v', 'error', '-show_entries',
                              'stream=codec_type,codec_name', '-of', 'csv=p=0', path], 180)
         if rc == 0 and t.strip():
@@ -321,15 +536,14 @@ def to_aac(ffmpeg, path):
 
 
 def has_single_file(yt, url):
-    """这个视频有没有「自带音轨的单文件流」。
-    （注意：YouTube 对很多视频已不再提供这种流，不能想当然）"""
+    """这个视频有没有「自带音轨的单文件流」（很多视频已经没有，不能想当然）。"""
     rc, t = run_capture([yt, '--simulate', '--no-warnings', '-f', 'b',
                          '--print', '%(format_id)s', url], 180)
     return rc == 0 and bool(t.strip())
 
 
 def refetch_with_audio(yt, ff, url, work, on_line=None):
-    """成品没有音轨时，改用「自带声音的单文件流」重新下载一次；没有这种流则返回 None。"""
+    """成品没有音轨时，改用「自带声音的单文件流」重下；没有这种流则返回 None。"""
     if not has_single_file(yt, url):
         return None
     sel = 'b[ext=mp4]/b'
@@ -353,11 +567,62 @@ def refetch_with_audio(yt, ff, url, work, on_line=None):
     return best
 
 
-def probe(yt, url):
-    rc, txt = run_capture([yt, '-J', '--no-warnings', '--no-playlist', url], timeout=240)
+# ---------------- 解析（流式） ----------------
+
+_STAGES = [
+    ('Downloading webpage', '读取视频页面'),
+    ('Downloading player', '加载播放器脚本'),
+    ('Downloading API JSON', '读取视频信息'),
+    ('Downloading tv client', '加载客户端配置'),
+    ('Downloading initial data', '读取初始数据'),
+    ('Downloading ios client', '加载客户端配置'),
+    ('Extracting URL', '解析链接'),
+    ('[youtube]', '解析视频信息'),
+    ('[generic]', '识别链接'),
+]
+
+
+def _stage_of(line):
+    for key, txt in _STAGES:
+        if key in line:
+            return txt
+    return ''
+
+
+def probe_stream(yt, url):
+    """解析视频信息，并把 yt-dlp 的过程流式显示（spinner）。"""
+    buf = []
+    logs = []
+    stage = {'txt': '正在解析链接'}
+
+    def on_line(line):
+        s = line.strip()
+        if not s:
+            return
+        if s.startswith('{'):
+            buf.append(line)
+            return
+        if s.startswith(('ERROR', 'WARNING')):
+            logs.append(s)
+            return
+        t = _stage_of(s)
+        if t:
+            stage['txt'] = t
+
+    def tick(elapsed):
+        extra = '%.1fs' % elapsed if elapsed > 0.8 else ''
+        spin_step(stage['txt'] + '…', extra)
+
+    try:
+        run_stream_tick([yt, '-J', '--no-warnings', '--no-playlist', '--newline', url],
+                        on_line, tick, interval=0.12, timeout=300)
+    finally:
+        spin_done()
+    txt = ''.join(buf)
     i = txt.find('{')
     if i < 0:
-        raise RuntimeError('解析失败：' + (txt.strip()[:280] or '没有返回数据'))
+        msg = logs[-1][:200] if logs else '没有返回数据'
+        raise RuntimeError('解析失败：' + msg)
     return json.loads(txt[i:])
 
 
@@ -390,9 +655,12 @@ def formats_of(info):
     return [by[k] for k in sorted(by.keys(), reverse=True)]
 
 
+# ---------------- 交互 ----------------
+
+
 def ask(prompt, default=''):
     try:
-        s = input(BOLD + prompt + RESET).strip()
+        s = input(' ' + CYAN + prompt + RESET).strip()
     except (EOFError, KeyboardInterrupt):
         return default
     return s or default
@@ -408,10 +676,91 @@ def ask_num(prompt, n, default=1):
         warn('请输入 1 - %d 之间的数字（q 退出）' % n)
 
 
-def bar(pct, width=28):
-    pct = max(0.0, min(100.0, float(pct)))
-    fill = int(width * pct / 100.0)
-    return '[' + ('#' * fill) + ('-' * (width - fill)) + '] %5.1f%%' % pct
+# ---------------- 展示 ----------------
+
+
+def show_banner(ytver, ff_ok, ffpath, out_dir):
+    print()
+    print(' ' + BOLD + CYAN + 'ytdl' + RESET + DIM + ' · YouTube 下载器' + RESET)
+    if ff_ok:
+        fftxt = GREEN + 'ffmpeg 已就绪' + RESET
+    else:
+        fftxt = RED + 'ffmpeg 不可用（无法合并音视频）' + RESET
+    print(' ' + DIM + 'yt-dlp ' + ytver + ' · ' + RESET + fftxt)
+    print(' ' + DIM + '保存到 ' + out_dir + RESET)
+    if not ff_ok:
+        note('修复（Termux）： pkg upgrade -y     或让脚本自动装静态版（bin/）')
+
+
+def show_info(info):
+    title = str(info.get('title') or '(无标题)')
+    lim = max(20, term_width() - 6)
+    for ln in wrap(title, lim):
+        bullet(ln, hot=True)
+    meta = []
+    if info.get('uploader'):
+        meta.append(str(info['uploader']))
+    if info.get('duration'):
+        meta.append(dur(info['duration']))
+    if info.get('view_count'):
+        meta.append(viewers(info['view_count']) + '次观看')
+    d = pretty_date(info.get('upload_date'))
+    if d:
+        meta.append(d)
+    if meta:
+        bullet(' · '.join(meta))
+
+
+def show_formats(fmts, default=0):
+    print(' ' + GRAY + '可用清晰度' + RESET)
+    for i, f in enumerate(fmts):
+        hot = (i == default)
+        mark = (CYAN + '▸' + RESET) if hot else ' '
+        col = WHITE if hot else GRAY
+        res = pad('%4sp' % f['short'], 7)
+        dim = pad('%d×%d' % (f['w'], f['h']), 12)
+        if f['avc']:
+            tag = GREEN + '原生 H.264' + RESET
+        else:
+            tag = YELLOW + '需转码' + RESET
+        if f['size']:
+            size = '≈ ' + human(f['size'])
+        else:
+            size = f['note'][:20] if f['note'] else ''
+        tail = (' ' + GRAY + size + RESET) if size else ''
+        print('  ' + mark + ' ' + col + '%2d)' % (i + 1) + ' ' + res + dim + RESET + tag + tail)
+
+
+def show_formats_choice(mode, default=1):
+    items = [
+        ('视频 MP4', 'H.264 + AAC，手机直接能播'),
+        ('仅音频 M4A', '只要声音'),
+        ('视频原画', '不转码，速度最快'),
+    ]
+    print(' ' + GRAY + '输出格式' + RESET)
+    for i, (name, desc) in enumerate(items):
+        hot = ((i + 1) == default)
+        mark = (CYAN + '▸' + RESET) if hot else ' '
+        col = WHITE if hot else GRAY
+        print('  ' + mark + ' ' + col + '%2d)' % (i + 1) + ' ' + name + RESET +
+              ' ' + GRAY + desc + RESET)
+
+
+def show_summary(title, res_label, mode, size):
+    names = {1: '视频 MP4（H.264 + AAC）', 2: '仅音频 M4A', 3: '视频原画（不转码）'}
+    lim = max(20, term_width() - 6)
+    for ln in wrap(title, lim)[:2]:
+        bullet(ln, hot=True)
+    extra = []
+    if res_label:
+        extra.append(res_label)
+    extra.append(names.get(mode, '视频'))
+    if size:
+        extra.append('≈ ' + human(size))
+    bullet(' · '.join(extra))
+
+
+# ---------------- 主流程 ----------------
 
 
 def main():
@@ -423,7 +772,6 @@ def main():
     url_arg = args[0] if args else ''
 
     yt = shutil.which('yt-dlp') or '/usr/local/bin/yt-dlp'
-    # 实测 ffmpeg 能不能跑：Termux 里常见“装了但库版本错位”，此时合并会失败 → 成品没声音
     ff, FF_OK = pick_ffmpeg()
     if not shutil.which('yt-dlp') and not os.path.exists(yt):
         bad('未找到 yt-dlp，请先运行：  sh install.sh')
@@ -437,23 +785,11 @@ def main():
         tmp_root = os.path.join(out_dir, '.work')
         os.makedirs(tmp_root, exist_ok=True)
 
-    print()
-    head('=' * 58)
-    head('  ytdl · YouTube 下载器（Termux）')
-    head('=' * 58)
     vtxt = '?'
-    if shutil.which('yt-dlp'):
-        rc0, t0 = run_capture([yt, '--version'], 30)
-        if t0.strip():
-            vtxt = t0.strip().splitlines()[0]
-    print('  yt-dlp : %s' % vtxt)
-    if FF_OK:
-        print('  ffmpeg : 已就绪')
-    else:
-        print('  ffmpeg : ' + RED + '无法运行' + RESET + DIM + '（无法合并音视频 → 成品会没有声音）' + RESET)
-        print(DIM + '           修复（Termux）：  pkg upgrade -y' + RESET)
-    print('  保存到 : %s' % out_dir)
-    print()
+    rc0, t0 = run_capture([yt, '--version'], 30)
+    if t0.strip():
+        vtxt = t0.strip().splitlines()[0]
+    show_banner(vtxt, FF_OK, ff, out_dir)
 
     while True:
         if auto and not url_arg:
@@ -463,98 +799,79 @@ def main():
         if not url or url.lower() in ('q', 'quit', 'exit'):
             break
         if ' ' in url.strip():
-            warn('这看起来不是视频链接（里面有空格）—— 要执行终端命令，'
-                 '请先输入 q 退出本程序。')
+            warn('这看起来不是视频链接（里面有空格）—— 要执行终端命令，请先输入 q 退出本程序。')
             print()
             continue
 
-        print()
-        print(DIM + '  正在解析，请稍候…' + RESET)
+        # ---------- ① 解析 ----------
+        section('①', '解析视频')
         try:
-            info = probe(yt, url)
+            info = probe_stream(yt, url)
         except Exception as e:
             bad(str(e))
             continue
 
-        print()
-        head('  ' + str(info.get('title') or '(无标题)'))
-        meta = []
-        if info.get('uploader'):
-            meta.append(str(info['uploader']))
-        if info.get('duration'):
-            meta.append('时长 ' + dur(info['duration']))
-        if info.get('view_count'):
-            meta.append(str(info['view_count']) + ' 次观看')
-        print(DIM + '  ' + ' | '.join(meta) + RESET)
-        print()
+        show_info(info)
 
         fmts = formats_of(info)
         chosen = None
         if fmts:
-            print('  可选分辨率：')
-            for i, f in enumerate(fmts, 1):
-                tag = '原生 H.264' if f['avc'] else '需转码'
-                extra = ''
-                if f['size']:
-                    extra = ' · 约 ' + human(f['size'])
-                elif f['note']:
-                    extra = ' · ' + f['note']
-                print('   %2d) %-6s %-10s %dx%d%s' % (i, str(f['short']) + 'p', tag, f['w'], f['h'], extra))
+            show_formats(fmts, 0)
             print()
             if auto:
                 pick = 1
             else:
-                pick = ask_num('  请选择分辨率 [1]: ', len(fmts), 1)
+                pick = ask_num('请选择清晰度 [1]: ', len(fmts), 1)
                 if pick < 0:
                     break
             chosen = fmts[pick - 1]
-            print()
 
-        print('  输出格式：')
-        print('    1) 视频 MP4（H.264 + AAC，手机直接能播）')
-        print('    2) 仅音频 M4A')
-        print('    3) 视频（保留原始编码，速度最快）')
+        # ---------- 格式选择 ----------
+        section('②', '选择格式')
+        show_formats_choice(1, 1)
         print()
         if auto:
             fmt_mode = 1
         else:
-            fmt_mode = ask_num('  请选择 [1]: ', 3, 1)
+            fmt_mode = ask_num('请选择 [1]: ', 3, 1)
             if fmt_mode < 0:
                 break
-        print()
 
         work = os.path.join(tmp_root, 'job-' + str(int(time.time())))
         os.makedirs(work, exist_ok=True)
         label = (str(chosen['short']) + 'p') if chosen else ''
+        picked_size = chosen['size'] if chosen else 0
 
         cmd = [yt, '--no-playlist', '--newline']
         if not FF_OK:
-            # ffmpeg 跑不起来 → 合并/转码必然失败，直接下「自带声音的单文件流」
             if fmt_mode == 2:
                 warn('ffmpeg 不可用，无法转成 M4A，将直接下载原始音频流。')
                 cmd += ['-f', 'ba']
                 title_show = '仅音频（原始流）'
-            elif has_single_file(yt, url):
-                warn('ffmpeg 不可用 → 无法合并音视频，已改用「自带声音的单文件流」'
-                     '（画质可能偏低，但保证有声音）。')
-                cmd += ['-f', 'b[ext=mp4]/b']
-                title_show = '视频（单文件流 · 带声音）'
-                label = ''
             else:
-                bad('这个视频没有「自带声音的单文件流」，'
-                    '必须用 ffmpeg 合并音视频才能做出带声音的成品。')
-                bad('请先修好 ffmpeg（Termux）：  pkg upgrade -y')
-                bad('若还不行：  pkg install -y --reinstall libc++ libplacebo ffmpeg')
-                bad('修好后重新运行即可。本次跳过，不生成无声文件。')
-                print()
-                continue
+                spin_step('检查是否有「自带声音的单文件流」…')
+                ok_single = has_single_file(yt, url)
+                spin_done()
+                if ok_single:
+                    warn('ffmpeg 不可用 → 无法合并音视频，已改用「自带声音的单文件流」'
+                         '（画质可能偏低，但保证有声音）。')
+                    cmd += ['-f', 'b[ext=mp4]/b']
+                    title_show = '视频（单文件流 · 带声音）'
+                    label = ''
+                else:
+                    bad('这个视频没有「自带声音的单文件流」，'
+                        '必须用 ffmpeg 合并音视频才能做出带声音的成品。')
+                    bad('请先修好 ffmpeg（Termux）：  pkg upgrade -y')
+                    bad('若还不行：  pkg install -y --reinstall libc++ libplacebo ffmpeg')
+                    bad('修好后重新运行即可。本次跳过，不生成无声文件。')
+                    print()
+                    continue
         elif fmt_mode == 2:
             cmd += ['-f', 'ba/b', '-x', '--audio-format', 'm4a', '--audio-quality', '0']
             title_show = '仅音频 M4A'
         else:
             if chosen:
                 cid = chosen['id']
-                # 音频优先挑 mp4a/aac：安卓播放器对 mp4 里的 opus 音频往往放不出声
                 sel = ('%s+ba[acodec^=mp4a]/%s+ba[acodec^=aac]/%s+ba' % (cid, cid, cid))
                 need_tc = (fmt_mode == 1) and (not chosen['avc'])
             else:
@@ -569,47 +886,97 @@ def main():
             cmd += ['--ffmpeg-location', os.path.dirname(ff)]
         cmd += ['-o', os.path.join(work, '%(title).70s.%(ext)s'), url]
 
-        print(BOLD + '  开始制作：' + title_show + RESET)
-        print()
+        # ---------- 确认 ----------
+        if not auto:
+            section('③', '确认')
+            show_summary(str(info.get('title') or ''), label, fmt_mode, picked_size)
+            print()
+            ans = ask('按回车开始制作（q 返回）> ', '')
+            if ans.lower() in ('q', 'quit', 'exit'):
+                print()
+                continue
 
-        state = {'pct': None, 'last': 0.0}
+        # ---------- 制作（全程流式） ----------
+        section('④', '开始制作')
+        print(' ' + GRAY + title_show + RESET)
+
+        state = {'cur': '视频流' if fmt_mode != 2 else '音频流',
+                 'dest_n': 0, 'last': 0.0, 'done': False, 'fin': set()}
+
+        def stage_done_text():
+            return state['cur'] + '下载完成'
 
         def on_line(line):
-            if '[download]' in line and '%' in line:
-                seg = line.split('[download]')[1].strip()
-                num = seg.split('%')[0].strip()
-                try:
-                    pct = float(num)
-                except Exception:
-                    return
-                now = time.time()
-                if pct < 100 and now - state['last'] < 0.2:
-                    return
-                state['last'] = now
-                state['pct'] = pct
-                sys.stdout.write(chr(13) + '  ' + GREEN + bar(pct) + RESET + ' ' + seg.split(' of ')[-1][:40] + '    ')
-                sys.stdout.flush()
-            elif '[Merger]' in line or 'Merging formats' in line:
-                print(chr(10) + '  ' + CYAN + '合并音视频…' + RESET)
-            elif '[ExtractAudio]' in line:
-                print(chr(10) + '  ' + CYAN + '提取音频…' + RESET)
-            elif '[VideoRemuxer]' in line:
-                print(chr(10) + '  ' + CYAN + '重封装容器…' + RESET)
-            elif '[VideoConvertor]' in line:
-                print(chr(10) + '  ' + CYAN + '转码中…' + RESET)
-            elif line.startswith('ERROR'):
-                print(chr(10) + '  ' + RED + line[:180] + RESET)
-            elif line.startswith('WARNING'):
-                if 'JavaScript runtime' in line:
-                    print(chr(10) + '  ' + YELLOW +
-                          'yt-dlp 提示：缺少 JS 运行时（deno），部分格式可能缺失'
-                          ' → 修复： pkg install deno' + RESET)
+            s = line.strip()
+            if s.startswith('[download] Destination:'):
+                state['dest_n'] += 1
+                if fmt_mode == 2:
+                    state['cur'] = '音频流'
                 else:
-                    print(chr(10) + '  ' + YELLOW + line[:180] + RESET)
+                    state['cur'] = '视频流' if state['dest_n'] == 1 else '音频流'
+                spin_step('准备下载 %s…' % state['cur'])
+                return
+            m = re.match(r'^\[download\]\s+([\d.]+)%\s+of\s+~?\s*([\d.]+\s*\S+)'
+                         r'(?:\s+at\s+([^\s]+))?(?:\s+ETA\s+([\d:]+))?', s)
+            if m:
+                if state['cur'] in state['fin']:
+                    return
+                pct = float(m.group(1))
+                size = m.group(2).replace(' ', '')
+                speed = m.group(3) or ''
+                eta = m.group(4) or ''
+                info_txt = ''
+                if speed and speed != 'Unknown':
+                    info_txt = speed
+                if eta:
+                    info_txt += ' ETA ' + eta
+                if pct >= 100:
+                    key = state['cur']
+                    if key in state['fin']:
+                        return
+                    state['fin'].add(key)
+                    prog_finish(' ' + GREEN + '✓' + RESET + ' ' + stage_done_text(),
+                                '[完成] ' + stage_done_text())
+                    state['done'] = True
+                else:
+                    now = time.time()
+                    if now - state['last'] > 0.15:
+                        state['last'] = now
+                        prog_show((GREEN + '↓' + RESET + ' ' + WHITE + state['cur'] + RESET), pct, info_txt)
+                return
+            if 'has already been downloaded' in s:
+                spin_done(' ' + GREEN + '✓' + RESET + ' ' + state['cur'] + '已存在，跳过下载')
+                return
+            if '[Merger]' in s or 'Merging formats' in s:
+                spin_step('处理：合并音视频…')
+                return
+            if '[ExtractAudio]' in s:
+                spin_step('处理：提取音频（转 M4A）…')
+                return
+            if '[VideoRemuxer]' in s:
+                spin_step('处理：重封装容器…')
+                return
+            if '[VideoConvertor]' in s:
+                spin_step('处理：视频转码中（这一步较慢）…')
+                return
+            if s.startswith('ERROR'):
+                spin_done()
+                bad(s[:180])
+                return
+            if s.startswith('WARNING'):
+                spin_done()
+                if 'JavaScript runtime' in s:
+                    warn_once('js', 'yt-dlp 提示：缺少 JS 运行时（deno），'
+                              '部分格式可能缺失 → 修复： pkg install deno')
+                else:
+                    warn(s[:180])
+                return
 
         rc = run_stream(cmd, on_line)
-        if state['pct'] is not None:
-            print()
+        spin_done()
+        if TTY and not state['done']:
+            sys.stdout.write('\r' + KILL)
+            sys.stdout.flush()
 
         files = []
         for f in glob.glob(os.path.join(work, '*')):
@@ -628,15 +995,16 @@ def main():
                 src = f
                 break
 
-        # ---- 成品校验：必须有音轨，而且音频要手机能播 ----
+        # ---- 音轨校验 ----
+        spin_step('检查成品音轨…')
         fp_path = pick_ffprobe(ff)
         vcodec, acodec = media_info(src, fp_path, ff)
+        spin_done()
         if not (vcodec or acodec):
-            warn('检测不到音轨信息（ffprobe / ffmpeg 都不可用）'
-                 ' —— 建议在 Termux 执行：  pkg upgrade -y')
+            warn('检测不到音轨信息（ffprobe / ffmpeg 都不可用）—— 建议： pkg upgrade -y')
         elif not acodec:
             warn('这个成品里没有音轨，正在改用「自带声音的单文件流」重新下载…')
-            newf = refetch_with_audio(yt, ff, url, work, on_line)
+            newf = refetch_with_audio(yt, ff, url, work, on_line=None)
             if newf:
                 src = newf
                 vcodec, acodec = media_info(src, fp_path, ff)
@@ -647,14 +1015,18 @@ def main():
                 warn('没有可用的 ffmpeg，合并音视频这一步做不了 → 请先修复：  pkg upgrade -y')
         elif acodec.lower() not in ('aac', 'mp4a', 'mp3'):
             warn('音频编码是 %s，安卓播放器常常放不出声，正在转成 AAC（视频不重编码）…' % acodec)
+            spin_step('转换音频为 AAC…')
             fixed = to_aac(ff, src)
+            spin_done()
             if fixed:
                 src = fixed
                 vcodec, acodec = media_info(src, fp_path, ff)
                 if acodec:
                     ok('音频已转成 %s' % acodec)
             else:
-                warn('音频转换失败，文件保持原样（可能这台设备没装 ffmpeg）')
+                warn('音频转换失败，文件保持原样')
+        else:
+            ok('音轨正常：%s + %s' % (vcodec or '?', acodec))
 
         ext = os.path.splitext(src)[1].lower()
         base = safe_name(os.path.splitext(os.path.basename(src))[0])
@@ -670,29 +1042,29 @@ def main():
             continue
         shutil.rmtree(work, ignore_errors=True)
 
+        # ---------- 完成 ----------
         size = os.path.getsize(dst)
-        print()
-        ok('完成')
-        print('     ' + dst)
-        print('     ' + DIM + human(size) + ' · 时长 ' + dur(info.get('duration')) + RESET)
+        section('⑤', '完成')
+        bullet('✓ ' + os.path.basename(dst), hot=True)
+        bullet(os.path.dirname(dst))
+        line2 = [human(size), dur(info.get('duration'))]
+        if vcodec:
+            line2.append('视频 ' + vcodec)
+        if chosen:
+            line2.append('%d×%d' % (chosen['w'], chosen['h']))
         if acodec:
-            print('     ' + DIM + '音轨 ' + str(vcodec or '?') + ' + ' + str(acodec) + RESET)
-        fp = fp_path
-        if fp and os.path.exists(fp):
-            rc2, t2 = run_capture([fp, '-v', 'error', '-show_entries',
-                                    'stream=codec_name,width,height,channels', '-of', 'csv=p=0', dst], 60)
-            if t2.strip() and 'CANNOT LINK' not in t2 and 'not found' not in t2:
-                print('     ' + DIM + '轨道 ' + ' / '.join(t2.strip().splitlines()) + RESET)
+            line2.append('音频 ' + acodec)
+        bullet(' · '.join([x for x in line2 if x]))
         print()
 
         if auto:
             break
-        if ask('  继续下一个链接？[y/N]: ', 'n').lower() not in ('y', 'yes'):
+        if ask('继续下一个链接？[y/N]: ', 'n').lower() not in ('y', 'yes'):
             break
         print()
 
     print()
-    print(DIM + '  文件都在：' + out_dir + RESET)
+    note('文件都在 ' + out_dir)
     print()
     return 0
 
