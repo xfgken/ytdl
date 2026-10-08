@@ -1,0 +1,6 @@
+__pycache__/
+bin/
+*.log
+*.mp4
+*.m4a
+.ytdl-work/
