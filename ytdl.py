@@ -730,14 +730,22 @@ BIG_TITLE = [
 
 
 def show_banner(ytver, ff_ok, ffpath, out_dir):
-    """多行 ASCII 大字标题"""
+    """多行 ASCII 大字标题 + 右上角署名"""
+    w = term_width()
+    blk = max(dwidth(x) for x in BIG_TITLE)
+    sign = 'by xfgken'
     print()
-    if term_width() >= 40:
+    if w >= 40:
+        room = (w >= blk + dwidth(sign) + 8)
         for i, ln in enumerate(BIG_TITLE):
             col = ACC_D if i in (0, 1) else ACC
-            print('  ' + BOLD + col + ln + RESET)
+            extra = ''
+            if i == 0 and room:
+                extra = '  ' + ACC + sign + RESET
+            print('  ' + BOLD + col + ln + RESET + extra)
     else:
-        print('  ' + BOLD + ACC + 'ytdl' + RESET)
+        tail = ('  ' + ACC + sign + RESET) if w >= 26 else ''
+        print('  ' + BOLD + ACC + 'ytdl' + RESET + tail)
     print('  ' + GRAY + 'YouTube 下载器 · Termux 版' + RESET)
 
 
