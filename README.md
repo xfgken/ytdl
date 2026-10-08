@@ -154,6 +154,46 @@ YTDL_OUT_DIR=/sdcard/Movies ytdl "链接"
 
 A：两种原因。①音轨是 opus 塞进 mp4（安卓放不出声）—— 本程序会在完成后自动检测并只转音频（不重编码视频）修好；②你的 ffmpeg 坏了，导致根本合不出音轨 —— 启动自检的 `ffmpeg` 那一行如果是 `✗`，说明就是它，程序会自动尝试重装，不行就用自带的静态 ffmpeg。
 
+**Q：提示 `Sign in to confirm you're not a bot`（解析失败）？**
+
+A：这是 YouTube 的风控 —— 它认为这次请求像机器人（常见于机房/代理 IP、短时间请求过多、没有登录态）。跟脚本无关，换个网络或带上 cookies 就能过。
+
+**① 带 cookies（最稳）**
+
+`ytdl` 会自动在这些位置找 `cookies.txt`：
+
+```
+/sdcard/Download/cookies.txt        ← 推荐放这里
+~/ytdl/cookies.txt
+~/cookies.txt
+~/storage/downloads/cookies.txt
+```
+
+也可以手动指定：
+
+```sh
+ytdl --cookies /sdcard/Download/cookies.txt "链接"
+YTDL_COOKIES=/sdcard/Download/cookies.txt ytdl "链接"
+```
+
+导出 cookies 的步骤（手机上）：
+
+1. 装一个支持 Chrome 扩展的浏览器，例如 **Kiwi Browser**
+2. 在它里面装扩展 **Get cookies.txt LOCALLY**
+3. 用它打开 `youtube.com` 并登录
+4. 打开扩展 → **Export** → 导出 `cookies.txt`
+5. 把文件保存/移动到 `/sdcard/Download/cookies.txt`（文件名保持 `cookies.txt`）
+
+> cookies 有有效期（通常几周到几个月），过期了就重新导出一次。启动画面里如果多出一行 `cookies /sdcard/Download/cookies.txt`，说明已经被识别到了。
+
+**② 换个网络再试**
+
+Wi-Fi ⇄ 手机流量切换，或重启路由器换 IP，风控常常是临时的，换个出口就过了。
+
+**③ 装上 JS 运行时**
+
+`pkg install -y deno`（yt-dlp 官方推荐的 JavaScript 运行时）。若只有 node，脚本会自动加 `--js-runtimes node`，但 deno 更稳，能减少风控触发。
+
 **Q：安装时报 `429 Too Many Requests` 或 `repository ... is not signed`？**
 
 A：这是 Termux 官方镜像被限流（或临时未签名），跟你手机无关。新版 `get.sh` / `ytdl.sh` 遇到这种情况会**自动依次切换清华 / 中科大 / 阿里镜像再重试**，原来的源会备份在 `$PREFIX/etc/apt/sources.list.ytdl.bak`。

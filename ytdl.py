@@ -574,8 +574,8 @@ def to_aac(ffmpeg, path):
 
 def has_single_file(yt, url):
     """这个视频有没有「自带音轨的单文件流」（很多视频已经没有，不能想当然）。"""
-    rc, t = run_capture([yt, '--simulate', '--no-warnings', '-f', 'b',
-                         '--print', '%(format_id)s', url], 180)
+    rc, t = run_capture([yt, '--simulate', '--no-warnings'] + compat_args()
+                        + ['-f', 'b', '--print', '%(format_id)s', url], 180)
     return rc == 0 and bool(t.strip())
 
 
@@ -584,7 +584,7 @@ def refetch_with_audio(yt, ff, url, work, on_line=None):
     if not has_single_file(yt, url):
         return None
     sel = 'b[ext=mp4]/b'
-    c = [yt, '--no-playlist', '--newline', '-f', sel,
+    c = [yt, '--no-playlist', '--newline'] + compat_args() + ['-f', sel,
          '--merge-output-format', 'mp4', '--remux-video', 'mp4']
     if os.path.dirname(ff):
         c += ['--ffmpeg-location', os.path.dirname(ff)]
@@ -626,6 +626,73 @@ def _stage_of(line):
     return ''
 
 
+COOKIES = None
+_JS_ARGS = None
+
+
+def pick_cookies():
+    """找一个可用的 cookies.txt（环境变量优先，其次常见路径）。"""
+    cands = []
+    v = os.environ.get('YTDL_COOKIES')
+    if v:
+        cands.append(v)
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        here = ''
+    cands += [
+        os.path.join(here, 'cookies.txt'),
+        os.path.expanduser('~/cookies.txt'),
+        '/sdcard/Download/cookies.txt',
+        os.path.expanduser('~/storage/downloads/cookies.txt'),
+        os.path.expanduser('~/storage/shared/Download/cookies.txt'),
+    ]
+    for c in cands:
+        try:
+            if c and os.path.isfile(c) and os.path.getsize(c) > 0:
+                return c
+        except Exception:
+            pass
+    return None
+
+
+def pick_jsargs():
+    """deno 是 yt-dlp 默认启用的 JS 运行时；只有其它运行时时需要显式指定。"""
+    for name, args in (('deno', []),
+                       ('bun', ['--js-runtimes', 'bun']),
+                       ('node', ['--js-runtimes', 'node']),
+                       ('qjs', ['--js-runtimes', 'quickjs'])):
+        if shutil.which(name):
+            return args
+    return []
+
+
+def compat_args():
+    """所有 yt-dlp 调用都附带的参数（cookies / JS 运行时）。"""
+    a = []
+    if COOKIES:
+        a += ['--cookies', COOKIES]
+    if _JS_ARGS:
+        a += _JS_ARGS
+    return a
+
+
+def guide_bot(err):
+    """YouTube 风控提示：教用户怎么把 cookies 弄到手。"""
+    t = str(err).lower()
+    if not ('sign in' in t or 'bot' in t or 'login' in t or 'cookie' in t):
+        return
+    print()
+    print('  ' + YELLOW + 'YouTube 认为这次请求像机器人，带上浏览器 cookies 就能过：' + RESET)
+    print('   ' + GRAY + '1) 手机上装 Kiwi Browser，加扩展 “Get cookies.txt LOCALLY”' + RESET)
+    print('   ' + GRAY + '2) 打开 youtube.com 并登录，用扩展导出 cookies.txt' + RESET)
+    print('   ' + GRAY + '3) 把文件放到 /sdcard/Download/cookies.txt' + RESET)
+    print('   ' + GRAY + '4) 重新运行 ytdl（会自动识别）' + RESET)
+    print('   ' + GRAY + '   也可手动指定： ytdl --cookies /sdcard/Download/cookies.txt "链接"' + RESET)
+    print('   ' + GRAY + '先换个网络（Wi-Fi ⇄ 流量）再试一次，有时也能过。' + RESET)
+    print()
+
+
 def probe_stream(yt, url):
     """解析视频信息：把 yt-dlp 的原始输出直接流式显示出来。"""
     buf = []
@@ -659,7 +726,8 @@ def probe_stream(yt, url):
             spin_step('%.1fs' % elapsed)
 
     try:
-        run_stream_tick([yt, '-J', '--verbose', '--no-playlist', '--newline', url],
+        run_stream_tick([yt, '-J', '--verbose', '--no-playlist', '--newline']
+                        + compat_args() + [url],
                         on_line, tick, interval=0.15, timeout=300)
     finally:
         spin_done()
@@ -849,7 +917,22 @@ def main():
     if '-y' in args or '--yes' in args:
         auto = True
         args = [a for a in args if a not in ('-y', '--yes')]
+    # --cookies <文件> / --cookies=<文件>：手动指定 cookies.txt
+    for i in range(len(args)):
+        a = args[i]
+        if a == '--cookies' and i + 1 < len(args):
+            os.environ['YTDL_COOKIES'] = args[i + 1]
+            del args[i:i + 2]
+            break
+        if a.startswith('--cookies='):
+            os.environ['YTDL_COOKIES'] = a.split('=', 1)[1]
+            del args[i]
+            break
     url_arg = args[0] if args else ''
+
+    global COOKIES, _JS_ARGS
+    COOKIES = pick_cookies()
+    _JS_ARGS = pick_jsargs()
 
     yt = shutil.which('yt-dlp') or '/usr/local/bin/yt-dlp'
     ff, FF_OK = pick_ffmpeg()
@@ -872,6 +955,8 @@ def main():
     show_banner(vtxt, FF_OK, ff, out_dir)
     print()
     show_checks(vtxt, FF_OK, ff, out_dir)
+    if COOKIES:
+        print('  ' + GRAY + 'cookies ' + COOKIES + RESET)
 
     while True:
         if auto and not url_arg:
@@ -891,6 +976,8 @@ def main():
             info = probe_stream(yt, url)
         except Exception as e:
             bad(str(e))
+            if not COOKIES:
+                guide_bot(e)
             continue
 
         fmts = formats_of(info)
@@ -923,7 +1010,7 @@ def main():
         label = (str(chosen['short']) + 'p') if chosen else ''
         picked_size = chosen['size'] if chosen else 0
 
-        cmd = [yt, '--no-playlist', '--newline']
+        cmd = [yt, '--no-playlist', '--newline'] + compat_args()
         if not FF_OK:
             if fmt_mode == 2:
                 warn('ffmpeg 不可用，无法转成 M4A，将直接下载原始音频流。')
