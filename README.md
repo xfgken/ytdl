@@ -9,15 +9,27 @@
 ## 一条命令（推荐）
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/xfgken/ytdl/main/get.sh | sh
-
+curl -fsSL https://raw.githubusercontent.com/xfgken/ytdl/main/get.sh -o "$TMPDIR/get.sh" && sh "$TMPDIR/get.sh"
 ```
+
+> 普通 Linux 把 `"$TMPDIR/get.sh"` 换成 `/tmp/get.sh` 即可。
 
 这一条命令会自动完成：
 
 1. 安装 git（如果缺）
 2. 下载（或更新）源码到 `~/ytdl`
 3. 启动脚本 —— 启动时会**先自检环境**，缺什么装什么，然后进入交互
+
+### 想用管道写法也行
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/xfgken/ytdl/main/get.sh | sh
+```
+
+> 小知识：Termux 里的 `sh` 是 **mksh**，它逐行读取传进去的脚本。如果脚本中途做了
+> `exec < /dev/tty` 这类改动 stdin 的动作，**剩下的行就会从终端读走**，于是你敲的
+> 字被当成命令执行，出现 `sh:39: i: not found` 这种怪错。本项目已避开该坑
+> （交互输入只在最后启动程序那一步重定向）。
 
 ---
 
