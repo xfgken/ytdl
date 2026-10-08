@@ -32,16 +32,20 @@ RED = ESC + '[91m'
 CYAN = ESC + '[96m'
 MAGENTA = ESC + '[95m'
 BLUE = ESC + '[94m'
+# 本轮主色：品红系（标签 / 小标题 / 框线 / 提示）
+ACC = ESC + '[95m'
+ACC_D = ESC + '[35m'
 WHITE = ESC + '[97m'
 GRAY = ESC + '[90m'
 RESET = ESC + '[0m'
 
 
 def _init_colors():
-    global BOLD, DIM, GREEN, YELLOW, RED, CYAN, MAGENTA, BLUE, WHITE, GRAY, RESET
+    global BOLD, DIM, GREEN, YELLOW, RED, CYAN, MAGENTA, BLUE, WHITE, GRAY, RESET, ACC, ACC_D
     if sys.stdout.isatty():
         return
     BOLD = DIM = GREEN = YELLOW = RED = CYAN = MAGENTA = BLUE = WHITE = GRAY = RESET = ''
+    ACC = ACC_D = ''
 
 
 _init_colors()
@@ -92,10 +96,10 @@ def out(m=''):
     print(m)
 
 
-def section(num, title):
-    """极简小标题"""
+def section(title):
+    """极简小标题（主色）"""
     print()
-    print(BOLD + CYAN + '%s %s' % (num, title) + RESET)
+    print(BOLD + ACC + title + RESET)
 
 
 def clear_line():
@@ -696,7 +700,7 @@ def formats_of(info):
 
 def ask(prompt, default=''):
     try:
-        s = input(' ' + CYAN + prompt + RESET).strip()
+        s = input(' ' + ACC + prompt + RESET).strip()
     except (EOFError, KeyboardInterrupt):
         return default
     return s or default
@@ -716,21 +720,42 @@ def ask_num(prompt, n, default=1):
 
 
 def show_banner(ytver, ff_ok, ffpath, out_dir):
-    w = min(48, max(32, term_width() - 4))
+    """标题卡片（品红圆角框）"""
+    w = min(46, max(30, term_width() - 4))
     inner = w - 4
     plain = 'ytdl · YouTube 下载器'
-    left = BOLD + CYAN + 'ytdl' + RESET + GRAY + ' · YouTube 下载器' + RESET
+    left = BOLD + ACC + 'ytdl' + RESET + GRAY + ' · YouTube 下载器' + RESET
     left += ' ' * max(0, inner - dwidth(plain))
     print()
-    print(GRAY + '╭' + '─' * (w - 2) + '╮' + RESET)
-    print(GRAY + '│' + RESET + ' ' + left + ' ' + GRAY + '│' + RESET)
-    print(GRAY + '╰' + '─' * (w - 2) + '╯' + RESET)
-    print(GRAY + '  yt-dlp ' + ytver + ' · ffmpeg ' +
-          ('已就绪' if ff_ok else '不可用') + RESET)
+    print(ACC + '╭' + '─' * (w - 2) + '╮' + RESET)
+    print(ACC + '│' + RESET + ' ' + left + ' ' + ACC + '│' + RESET)
+    print(ACC + '╰' + '─' * (w - 2) + '╯' + RESET)
+
+
+def show_checks(ytver, ff_ok, ffpath, out_dir):
+    """就位状态：✓ 就位 / ✗ 未就位"""
+
+    def row(good, name, extra=''):
+        mark = (GREEN + '✓' + RESET) if good else (RED + '✗' + RESET)
+        tail = (GRAY + '  ' + extra + RESET) if extra else ''
+        print('  ' + mark + ' ' + WHITE + name + RESET + tail)
+
+    row(True, 'python ' + sys.version.split()[0])
+    row(bool(ytver and ytver != '?'), 'yt-dlp ' + (ytver or '未安装'))
+    if ff_ok:
+        row(True, 'ffmpeg', ffpath)
+    else:
+        row(False, 'ffmpeg 未就位', '无法合并音视频 → pkg upgrade -y')
+    js = ''
+    for j in ('deno', 'node', 'qjs', 'bun'):
+        if shutil.which(j):
+            js = j
+            break
+    if js:
+        row(True, 'JS 运行时 ' + js)
+    else:
+        row(False, 'JS 运行时缺失', '建议： pkg install deno')
     print(GRAY + '  ' + out_dir + RESET)
-    if not ff_ok:
-        print(YELLOW + '  ffmpeg 不可用 → 无法合并音视频；先执行 pkg upgrade -y，'
-              '或让脚本自动装静态版到 bin/' + RESET)
 
 
 def show_info(info, fmts=None):
@@ -738,12 +763,12 @@ def show_info(info, fmts=None):
     title = str(info.get('title') or '(无标题)')
     lim = max(20, term_width() - 10)
     lines = wrap(title, lim)
-    print('  ' + GRAY + pad('标题', 8) + RESET + BOLD + WHITE + lines[0] + RESET)
+    print('  ' + ACC + pad('标题', 8) + RESET + BOLD + WHITE + lines[0] + RESET)
     for ln in lines[1:]:
         print('  ' + ' ' * 8 + BOLD + WHITE + ln + RESET)
 
     def row(label, value):
-        print('  ' + GRAY + pad(label, 8) + RESET + WHITE + value + RESET)
+        print('  ' + ACC + pad(label, 8) + RESET + WHITE + value + RESET)
 
     if info.get('uploader'):
         row('作者', str(info['uploader']))
@@ -823,11 +848,13 @@ def main():
     if t0.strip():
         vtxt = t0.strip().splitlines()[0]
     show_banner(vtxt, FF_OK, ff, out_dir)
+    print()
+    show_checks(vtxt, FF_OK, ff, out_dir)
 
     while True:
         if auto and not url_arg:
             break
-        url = url_arg or ask('请粘贴视频链接（q 退出）> ')
+        url = url_arg or ask('请输入解析的链接（q 退出）> ')
         url_arg = ''
         if not url or url.lower() in ('q', 'quit', 'exit'):
             break
@@ -837,7 +864,8 @@ def main():
             continue
 
         # ---------- ① 解析 ----------
-        section('①', '解析')
+        section('解析')
+        print(ACC + '  解析中…' + RESET)
         try:
             info = probe_stream(yt, url)
         except Exception as e:
@@ -859,7 +887,7 @@ def main():
             chosen = fmts[pick - 1]
 
         # ---------- 格式选择 ----------
-        section('②', '格式')
+        section('格式')
         show_formats_choice(1, 1)
         print()
         if auto:
@@ -927,7 +955,7 @@ def main():
                 continue
 
         # ---------- 制作（原样流式） ----------
-        section('③', '制作')
+        section('制作')
         print(GRAY + '  ' + title_show + RESET)
 
         state = {'cur': '视频流' if fmt_mode != 2 else '音频流',

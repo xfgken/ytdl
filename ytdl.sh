@@ -19,7 +19,8 @@ if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ]; then is_termux=1; fi
 
 have() { command -v "$1" >/dev/null 2>&1; }
 say()  { printf '%s\n' "$*"; }
-ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+# 就位状态统一由 ytdl.py 展示，这里成功项静默
+ok()   { :; }
 bad()  { printf '  \033[33m✗\033[0m %s\n' "$*"; }
 step() { printf '\n\033[1;36m%s\033[0m\n' "$*"; }
 
@@ -56,8 +57,7 @@ install_static_ffmpeg() {
   return 1
 }
 
-# ---------------- 环境自检 ----------------
-step '环境自检'
+# ---------------- 环境自检（成功静默，缺失才说话）----------------
 missing=""
 JS_MISSING=0
 FF_BROKEN=0
