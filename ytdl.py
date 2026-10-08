@@ -719,17 +719,26 @@ def ask_num(prompt, n, default=1):
 # ---------------- 展示 ----------------
 
 
+BIG_TITLE = [
+    '██╗   ██╗████████╗██████╗ ██╗',
+    '╚██╗ ██╔╝╚══██╔══╝██╔══██╗██║',
+    ' ╚████╔╝    ██║   ██║  ██║██║',
+    '  ╚██╔╝     ██║   ██║  ██║██║',
+    '   ██║      ██║   ██████╔╝███████╗',
+    '   ╚═╝      ╚═╝   ╚═════╝ ╚══════╝',
+]
+
+
 def show_banner(ytver, ff_ok, ffpath, out_dir):
-    """标题卡片（品红圆角框）"""
-    w = min(46, max(30, term_width() - 4))
-    inner = w - 4
-    plain = 'ytdl · YouTube 下载器'
-    left = BOLD + ACC + 'ytdl' + RESET + GRAY + ' · YouTube 下载器' + RESET
-    left += ' ' * max(0, inner - dwidth(plain))
+    """多行 ASCII 大字标题"""
     print()
-    print(ACC + '╭' + '─' * (w - 2) + '╮' + RESET)
-    print(ACC + '│' + RESET + ' ' + left + ' ' + ACC + '│' + RESET)
-    print(ACC + '╰' + '─' * (w - 2) + '╯' + RESET)
+    if term_width() >= 40:
+        for i, ln in enumerate(BIG_TITLE):
+            col = ACC_D if i in (0, 1) else ACC
+            print('  ' + BOLD + col + ln + RESET)
+    else:
+        print('  ' + BOLD + ACC + 'ytdl' + RESET)
+    print('  ' + GRAY + 'YouTube 下载器 · Termux 版' + RESET)
 
 
 def show_checks(ytver, ff_ok, ffpath, out_dir):
@@ -763,12 +772,12 @@ def show_info(info, fmts=None):
     title = str(info.get('title') or '(无标题)')
     lim = max(20, term_width() - 10)
     lines = wrap(title, lim)
-    print('  ' + ACC + pad('标题', 8) + RESET + BOLD + WHITE + lines[0] + RESET)
+    print('  ' + ACC + pad('标题：', 10) + RESET + BOLD + WHITE + lines[0] + RESET)
     for ln in lines[1:]:
-        print('  ' + ' ' * 8 + BOLD + WHITE + ln + RESET)
+        print('  ' + ' ' * 10 + BOLD + WHITE + ln + RESET)
 
     def row(label, value):
-        print('  ' + ACC + pad(label, 8) + RESET + WHITE + value + RESET)
+        print('  ' + ACC + pad(label + '：', 10) + RESET + WHITE + value + RESET)
 
     if info.get('uploader'):
         row('作者', str(info['uploader']))
@@ -864,8 +873,8 @@ def main():
             continue
 
         # ---------- ① 解析 ----------
-        section('解析')
-        print(ACC + '  解析中…' + RESET)
+        print()
+        print(BOLD + ACC + '开始解析' + RESET)
         try:
             info = probe_stream(yt, url)
         except Exception as e:
