@@ -6,21 +6,51 @@
 
 ---
 
-## 三步使用（Termux）
+## 一条命令（推荐）
 
 ```sh
-# 1. 从 GitHub 拉取脚本
-git clone https://github.com/xfgken/ytdl.git
-cd ytdl
+curl -fsSL https://raw.githubusercontent.com/xfgken/ytdl/main/get.sh | sh
 
-# 2. 安装所需环境与引擎工具（python / ffmpeg / yt-dlp）
-sh install.sh
-
-# 3. 运行脚本，然后输入链接、选分辨率、选格式
-sh ytdl.sh
 ```
 
-> 也可以跳过第 2 步：直接 `sh ytdl.sh`，缺什么它会自动用 `pkg` 装上。
+这一条命令会自动完成：
+
+1. 安装 git（如果缺）
+2. 下载（或更新）源码到 `~/ytdl`
+3. 启动脚本 —— 启动时会**先自检环境**，缺什么装什么，然后进入交互
+
+---
+
+## 或者分步来（Termux）
+
+```sh
+git clone https://github.com/xfgken/ytdl.git && cd ytdl
+sh install.sh     # 只装环境（可选，ytdl.sh 也会自动装）
+sh ytdl.sh        # 启动（每次都会先自检）
+
+```
+
+---
+
+## 启动时都检查什么
+
+每次运行 `sh ytdl.sh` 都会先过一遍：
+
+| 检查项 | 缺失时的处理 |
+
+|---|---|
+
+| python3 | Termux 自动 `pkg install python` |
+
+| yt-dlp | Termux 自动 `pkg install yt-dlp`；Linux 自动下载对应架构二进制 |
+
+| ffmpeg | Termux 自动 `pkg install ffmpeg`；Linux 用 apt |
+
+| 存储权限 | 首次运行自动调起 `termux-setup-storage` |
+
+| 成品目录 | 自动选择第一个可写目录 |
+
+检查本身只花零点几秒，不会拖慢启动。
 
 ---
 
@@ -52,6 +82,7 @@ sh ytdl.sh
      /sdcard/Download/YouTube/标题_1080p.mp4
      6.4 MB · 时长 0:26
      轨道 h264,1080,1920 / aac,2
+
 ```
 
 ---
@@ -75,6 +106,7 @@ sh ytdl.sh
 sh ytdl.sh                    # 交互式
 sh ytdl.sh "<链接>"           # 带上链接
 sh ytdl.sh "<链接>" -y        # 全部默认选项（无人值守）
+
 ```
 
 ---
@@ -82,10 +114,15 @@ sh ytdl.sh "<链接>" -y        # 全部默认选项（无人值守）
 ## 文件说明
 
 | 文件 | 作用 |
+
 |---|---|
+
 | `ytdl.sh` | 启动入口（Termux 里缺依赖会自动装） |
+
 | `ytdl.py` | 交互主程序：解析、选分辨率、选格式、下载合并、命名 |
+
 | `install.sh` | 只装环境：python、ffmpeg、yt-dlp、存储权限 |
+
 | `bin/` | 可选：自带引擎放这里（优先使用，仓库不收录） |
 
 ---
