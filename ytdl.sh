@@ -132,12 +132,16 @@ if [ "$need_work" = '1' ]; then
       pkg install -y deno </dev/null 2>&1 | tail -2 || say '（deno 没装上也没关系，继续）'
     fi
     if [ "$FF_BROKEN" = '1' ]; then
-      say '修复 1/3：先治好 dpkg（Termux 包数据库，常见 openssl 半配置）…'
+      # 关键：坏掉的 ffmpeg 安装后脚本会一直失败，并把整个 dpkg 操作中断，
+      # 导致其他包（含 libc++）永远配不完。所以先把它卸下来，让 dpkg 恢复干净。
+      say '修复 1/3：先把报错的 ffmpeg 卸下来，让 dpkg 恢复干净…'
+      pkg uninstall -y ffmpeg </dev/null 2>&1 | tail -2 || true
       pkg install -y --reinstall openssl </dev/null 2>&1 | tail -2 || true
       apt --fix-broken install -y </dev/null 2>&1 | tail -2 || true
       dpkg --configure -a </dev/null 2>&1 | tail -2 || true
-      say '修复 2/3：重装 ffmpeg…'
-      pkg install -y --reinstall ffmpeg </dev/null 2>&1 | tail -2 || true
+      say '修复 2/3：升级全部包，然后重装 ffmpeg…'
+      pkg upgrade -y </dev/null 2>&1 | tail -2 || true
+      pkg install -y ffmpeg </dev/null 2>&1 | tail -2 || true
       if ! ffmpeg -version >/dev/null 2>&1; then
         say '修复 3/3：改下载「自带库的静态 ffmpeg」放进项目 bin/（绕开 Termux 库问题）…'
         install_static_ffmpeg
