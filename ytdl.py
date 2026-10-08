@@ -96,10 +96,17 @@ def out(m=''):
     print(m)
 
 
+def hr():
+    """满宽虚线，用来分隔大区域"""
+    w = term_width()
+    n = max(4, (w - 2) // 2)
+    print(ACC_D + ' ' + '─ ' * n + RESET)
+
+
 def section(title):
-    """极简小标题（主色）"""
-    print()
-    print(BOLD + ACC + title + RESET)
+    """区域：一条长虚线 + 区域标题"""
+    hr()
+    print(BOLD + ACC + ' ' + title + RESET)
 
 
 def clear_line():
@@ -747,6 +754,7 @@ def show_banner(ytver, ff_ok, ffpath, out_dir):
         tail = ('  ' + ACC + sign + RESET) if w >= 26 else ''
         print('  ' + BOLD + ACC + 'ytdl' + RESET + tail)
     print('  ' + GRAY + 'YouTube 下载器 · Termux 版' + RESET)
+    hr()
 
 
 def show_checks(ytver, ff_ok, ffpath, out_dir):
@@ -881,8 +889,7 @@ def main():
             continue
 
         # ---------- ① 解析 ----------
-        print()
-        print(BOLD + ACC + '开始解析' + RESET)
+        section('开始解析')
         try:
             info = probe_stream(yt, url)
         except Exception as e:
@@ -1079,7 +1086,7 @@ def main():
 
         # ---------- 完成 ----------
         size = os.path.getsize(dst)
-        print()
+        hr()
         print(GREEN + '✓ 完成' + RESET)
         bullet(os.path.basename(dst), hot=True)
         bullet(os.path.dirname(dst))
