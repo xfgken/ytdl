@@ -138,9 +138,112 @@ def unique_path(d, base, ext):
     return p
 
 
+def _boxes(buf, start, end):
+    """枚举 [start, end) 范围内的 mp4 box：(type, payload_start, payload_end)"""
+    i = start
+    out = []
+    while i + 8 <= end:
+        size = int.from_bytes(buf[i:i + 4], 'big')
+        typ = buf[i + 4:i + 8]
+        if size == 1:
+            if i + 16 > end:
+                break
+            size = int.from_bytes(buf[i + 8:i + 16], 'big')
+            hdr = 16
+        elif size == 0:
+            size = end - i
+            hdr = 8
+        else:
+            hdr = 8
+        if size < hdr or i + size > end:
+            break
+        out.append((typ, i + hdr, i + size))
+        i += size
+    return out
+
+
+_MP4_CODEC = {
+    b'mp4a': 'aac', b'Opus': 'opus', b'opus': 'opus', b'alac': 'alac',
+    b'ec-3': 'eac3', b'ac-3': 'ac3', b'sowt': 'pcm',
+    b'avc1': 'h264', b'avc3': 'h264', b'hvc1': 'hevc', b'hev1': 'hevc',
+    b'vp09': 'vp9', b'av01': 'av1', b'mp4v': 'mpeg4',
+}
+
+
+def _parse_moov(buf, s_, e_):
+    vcodec = acodec = None
+    for typ, ps, pe in _boxes(buf, s_, e_):
+        if typ != b'trak':
+            continue
+        hand = None
+        codec = None
+        for t2, p2, e2 in _boxes(buf, ps, pe):
+            if t2 != b'mdia':
+                continue
+            for t3, p3, e3 in _boxes(buf, p2, e2):
+                if t3 == b'hdlr':
+                    hand = buf[p3 + 8:p3 + 12]
+                elif t3 == b'minf':
+                    for t4, p4, e4 in _boxes(buf, p3, e3):
+                        if t4 != b'stbl':
+                            continue
+                        for t5, p5, e5 in _boxes(buf, p4, e4):
+                            if t5 == b'stsd':
+                                off = p5 + 8
+                                if off + 8 <= e5:
+                                    codec = buf[off + 4:off + 8]
+        name = _MP4_CODEC.get(codec or b'', (codec or b'').decode('latin-1') or None)
+        if hand == b'vide' and not vcodec:
+            vcodec = name
+        elif hand == b'soun' and not acodec:
+            acodec = name
+    return vcodec, acodec
+
+
+def mp4_info(path):
+    """纯 Python 解析 mp4 容器，返回 (vcodec, acodec)。不依赖 ffprobe / ffmpeg。"""
+    try:
+        size = os.path.getsize(path)
+    except Exception:
+        return None, None
+    chunks = []
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(4 * 1024 * 1024)
+            chunks.append(head)
+            if size > 8 * 1024 * 1024:
+                f.seek(size - 4 * 1024 * 1024)
+                chunks.append(f.read())
+    except Exception:
+        return None, None
+    for buf in chunks:
+        idx = 0
+        while True:
+            j = buf.find(b'moov', idx)
+            if j < 0:
+                break
+            mstart = j - 4
+            if mstart >= 0:
+                msize = int.from_bytes(buf[mstart:mstart + 4], 'big')
+                mend = len(buf) if (msize < 8 or mstart + msize > len(buf)) else mstart + msize
+                v, a = _parse_moov(buf, mstart + 8, mend)
+                if v or a:
+                    return v, a
+            idx = j + 4
+    return None, None
+
+
 def media_info(path, ffprobe, ffmpeg):
-    """读取成品里的视频/音频编码。返回 (vcodec, acodec)，取不到返回 (None, None)。"""
+    """读取成品里的视频/音频编码。
+    优先用纯 Python 解析 mp4 容器（Termux 里 ffprobe/ffmpeg 可能因库版本错位跑不起来），
+    解析不到再退回 ffprobe / ffmpeg。返回 (vcodec, acodec)，检测不到返回 (None, None)。"""
+    ext = os.path.splitext(str(path))[1].lower()
+    if ext in ('.mp4', '.m4a', '.mov'):
+        v0, a0 = mp4_info(path)
+        if v0 or a0:
+            return v0, a0
     if ffprobe and os.path.exists(ffprobe):
+
         rc, t = run_capture([ffprobe, '-v', 'error', '-show_entries',
                              'stream=codec_type,codec_name', '-of', 'csv=p=0', path], 180)
         if rc == 0 and t.strip():
@@ -184,9 +287,19 @@ def to_aac(ffmpeg, path):
     return None
 
 
+def has_single_file(yt, url):
+    """这个视频有没有「自带音轨的单文件流」。
+    （注意：YouTube 对很多视频已不再提供这种流，不能想当然）"""
+    rc, t = run_capture([yt, '--simulate', '--no-warnings', '-f', 'b',
+                         '--print', '%(format_id)s', url], 180)
+    return rc == 0 and bool(t.strip())
+
+
 def refetch_with_audio(yt, ff, url, work, on_line=None):
-    """成品没有音轨时，改用「自带声音的单文件流」重新下载一次。"""
-    sel = 'b[ext=mp4][acodec!=none]/b[acodec!=none]/b'
+    """成品没有音轨时，改用「自带声音的单文件流」重新下载一次；没有这种流则返回 None。"""
+    if not has_single_file(yt, url):
+        return None
+    sel = 'b[ext=mp4]/b'
     c = [yt, '--no-playlist', '--newline', '-f', sel,
          '--merge-output-format', 'mp4', '--remux-video', 'mp4']
     if os.path.dirname(ff):
@@ -278,6 +391,12 @@ def main():
 
     yt = shutil.which('yt-dlp') or '/usr/local/bin/yt-dlp'
     ff = shutil.which('ffmpeg') or '/usr/bin/ffmpeg'
+    # 实测 ffmpeg 能不能跑：Termux 里常见“装了但库版本错位”，此时合并会失败 → 成品没声音
+    FF_OK = False
+    if shutil.which('ffmpeg') or os.path.exists(ff):
+        rc_f, t_f = run_capture([ff, '-version'], 60)
+        low = t_f.lower()
+        FF_OK = ('version' in low) and ('cannot link' not in low)
     if not shutil.which('yt-dlp') and not os.path.exists(yt):
         bad('未找到 yt-dlp，请先运行：  sh install.sh')
         return 1
@@ -300,11 +419,17 @@ def main():
         if t0.strip():
             vtxt = t0.strip().splitlines()[0]
     print('  yt-dlp : %s' % vtxt)
-    print('  ffmpeg : %s' % ('已就绪' if (shutil.which('ffmpeg') or os.path.exists(ff)) else '未找到（合并会失败）'))
+    if FF_OK:
+        print('  ffmpeg : 已就绪')
+    else:
+        print('  ffmpeg : ' + RED + '无法运行' + RESET + DIM + '（无法合并音视频 → 成品会没有声音）' + RESET)
+        print(DIM + '           修复（Termux）：  pkg upgrade -y' + RESET)
     print('  保存到 : %s' % out_dir)
     print()
 
     while True:
+        if auto and not url_arg:
+            break
         url = url_arg or ask('请粘贴视频链接（q 退出）> ')
         url_arg = ''
         if not url or url.lower() in ('q', 'quit', 'exit'):
@@ -370,7 +495,27 @@ def main():
         label = (str(chosen['short']) + 'p') if chosen else ''
 
         cmd = [yt, '--no-playlist', '--newline']
-        if fmt_mode == 2:
+        if not FF_OK:
+            # ffmpeg 跑不起来 → 合并/转码必然失败，直接下「自带声音的单文件流」
+            if fmt_mode == 2:
+                warn('ffmpeg 不可用，无法转成 M4A，将直接下载原始音频流。')
+                cmd += ['-f', 'ba']
+                title_show = '仅音频（原始流）'
+            elif has_single_file(yt, url):
+                warn('ffmpeg 不可用 → 无法合并音视频，已改用「自带声音的单文件流」'
+                     '（画质可能偏低，但保证有声音）。')
+                cmd += ['-f', 'b[ext=mp4]/b']
+                title_show = '视频（单文件流 · 带声音）'
+                label = ''
+            else:
+                bad('这个视频没有「自带声音的单文件流」，'
+                    '必须用 ffmpeg 合并音视频才能做出带声音的成品。')
+                bad('请先修好 ffmpeg（Termux）：  pkg upgrade -y')
+                bad('若还不行：  pkg install -y --reinstall libc++ libplacebo ffmpeg')
+                bad('修好后重新运行即可。本次跳过，不生成无声文件。')
+                print()
+                continue
+        elif fmt_mode == 2:
             cmd += ['-f', 'ba/b', '-x', '--audio-format', 'm4a', '--audio-quality', '0']
             title_show = '仅音频 M4A'
         else:
@@ -420,7 +565,14 @@ def main():
             elif '[VideoConvertor]' in line:
                 print(chr(10) + '  ' + CYAN + '转码中…' + RESET)
             elif line.startswith('ERROR'):
-                print(chr(10) + '  ' + RED + line[:150] + RESET)
+                print(chr(10) + '  ' + RED + line[:180] + RESET)
+            elif line.startswith('WARNING'):
+                if 'JavaScript runtime' in line:
+                    print(chr(10) + '  ' + YELLOW +
+                          'yt-dlp 提示：缺少 JS 运行时（deno），部分格式可能缺失'
+                          ' → 修复： pkg install deno' + RESET)
+                else:
+                    print(chr(10) + '  ' + YELLOW + line[:180] + RESET)
 
         rc = run_stream(cmd, on_line)
         if state['pct'] is not None:
@@ -450,14 +602,20 @@ def main():
             if os.path.exists(cand2):
                 fp_path = cand2
         vcodec, acodec = media_info(src, fp_path, ff)
-        if not acodec:
+        if not (vcodec or acodec):
+            warn('检测不到音轨信息（ffprobe / ffmpeg 都不可用）'
+                 ' —— 建议在 Termux 执行：  pkg upgrade -y')
+        elif not acodec:
             warn('这个成品里没有音轨，正在改用「自带声音的单文件流」重新下载…')
             newf = refetch_with_audio(yt, ff, url, work, on_line)
             if newf:
                 src = newf
                 vcodec, acodec = media_info(src, fp_path, ff)
         if not acodec:
-            warn('这个视频源本身可能就没有声音（YouTube 上确实有静音视频）')
+            if FF_OK:
+                warn('这个视频源本身可能就没有声音（YouTube 上确实有静音视频）')
+            else:
+                warn('没有可用的 ffmpeg，合并音视频这一步做不了 → 请先修复：  pkg upgrade -y')
         elif acodec.lower() not in ('aac', 'mp4a', 'mp3'):
             warn('音频编码是 %s，安卓播放器常常放不出声，正在转成 AAC（视频不重编码）…' % acodec)
             fixed = to_aac(ff, src)
@@ -488,11 +646,13 @@ def main():
         ok('完成')
         print('     ' + dst)
         print('     ' + DIM + human(size) + ' · 时长 ' + dur(info.get('duration')) + RESET)
+        if acodec:
+            print('     ' + DIM + '音轨 ' + str(vcodec or '?') + ' + ' + str(acodec) + RESET)
         fp = shutil.which('ffprobe')
         if fp:
             rc2, t2 = run_capture([fp, '-v', 'error', '-show_entries',
                                     'stream=codec_name,width,height,channels', '-of', 'csv=p=0', dst], 60)
-            if t2.strip():
+            if t2.strip() and 'CANNOT LINK' not in t2 and 'not found' not in t2:
                 print('     ' + DIM + '轨道 ' + ' / '.join(t2.strip().splitlines()) + RESET)
         print()
 
