@@ -630,6 +630,18 @@ COOKIES = None
 _JS_ARGS = None
 
 
+def pick_ytdlp():
+    """优先用项目自带的 bin/yt-dlp（自检会自动更新到最新版），其次 PATH 里的。"""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        here = ''
+    cand = os.path.join(here, 'bin', 'yt-dlp')
+    if cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
+        return cand
+    return shutil.which('yt-dlp') or '/usr/local/bin/yt-dlp'
+
+
 def pick_cookies():
     """找一个可用的 cookies.txt（环境变量优先，其次常见路径）。"""
     cands = []
@@ -962,7 +974,7 @@ def main():
     COOKIES = pick_cookies()
     _JS_ARGS = pick_jsargs()
 
-    yt = shutil.which('yt-dlp') or '/usr/local/bin/yt-dlp'
+    yt = pick_ytdlp()
     ff, FF_OK = pick_ffmpeg()
     if not shutil.which('yt-dlp') and not os.path.exists(yt):
         bad('未找到 yt-dlp，请先运行：  sh install.sh')

@@ -94,6 +94,85 @@ install_static_ffmpeg() {
   return 1
 }
 
+# 版本号距今多少天（形如 2026.06.09；失败返回非 0）
+ver_age_days() {
+  v="$1"
+  y=${v%%.*}; r=${v#*.}; m=${r%%.*}; d=${r#*.}
+  case "$y$m$d" in *[!0-9]*) return 1 ;; esac
+  [ -n "$y" ] && [ -n "$m" ] && [ -n "$d" ] || return 1
+  n=$(date +%s 2>/dev/null) || return 1
+  t=$(date -d "$y-$m-$d" +%s 2>/dev/null) || return 1
+  [ "$n" -gt "$t" ] || return 1
+  echo $(( (n - t) / 86400 ))
+}
+
+# yt-dlp 太旧就自动更新：YouTube 变更频繁，旧版常报 "The page needs to be reloaded."
+# 更新产物放项目 bin/yt-dlp（不动系统包，也不怕 pkg upgrade 覆盖）
+ensure_ytdlp_fresh() {
+  cur=''
+  if [ -x bin/yt-dlp ]; then
+    cur=$(bin/yt-dlp --version 2>/dev/null | head -1)
+  elif have yt-dlp; then
+    cur=$(yt-dlp --version 2>/dev/null | head -1)
+  fi
+  [ -n "$cur" ] || return 1
+  age=$(ver_age_days "$cur" 2>/dev/null) || return 1
+  [ "$age" -gt 30 ] || return 1
+
+  # 7 天内检查过就不再联网
+  CKF='bin/.ytdlp-check'
+  if [ -f "$CKF" ]; then
+    last=$(cat "$CKF" 2>/dev/null || echo 0)
+    now=$(date +%s 2>/dev/null || echo 0)
+    case "$last$now" in
+      *[!0-9]*) ;;
+      *) [ $((now - last)) -lt 604800 ] && return 1 ;;
+    esac
+  fi
+
+  say "yt-dlp 有点旧（$cur，约 ${age} 天前）→ 检查最新版…"
+  mkdir -p bin
+  URL='https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp'
+  rm -f bin/yt-dlp.tmp
+  if have curl; then
+    curl -fL --connect-timeout 20 -o bin/yt-dlp.tmp "$URL" || true
+  elif have wget; then
+    wget -q -O bin/yt-dlp.tmp "$URL" || true
+  else
+    say '  （没有 curl/wget，跳过更新）'
+    return 1
+  fi
+  if [ ! -s bin/yt-dlp.tmp ]; then
+    rm -f bin/yt-dlp.tmp
+    say '  （下载没成功，先用现有版本；网络好时重跑一次即可）'
+    return 1
+  fi
+  chmod 755 bin/yt-dlp.tmp 2>/dev/null || true
+  newv=$(python3 bin/yt-dlp.tmp --version 2>/dev/null | head -1)
+  if [ -z "$newv" ]; then
+    rm -f bin/yt-dlp.tmp
+    say '  （新版跑不起来，保留现有版本）'
+    return 1
+  fi
+  if [ "$newv" = "$cur" ]; then
+    rm -f bin/yt-dlp.tmp
+    say "  已是最新（$cur）"
+    date +%s > "$CKF" 2>/dev/null || true
+    return 0
+  fi
+  # 只有确实更新（版本更大）才替换
+  if [ "$(printf '%s\n%s\n' "$newv" "$cur" | sort | tail -1)" = "$cur" ]; then
+    rm -f bin/yt-dlp.tmp
+    say "  已是最新（$cur）"
+    date +%s > "$CKF" 2>/dev/null || true
+    return 0
+  fi
+  mv bin/yt-dlp.tmp bin/yt-dlp
+  say "  ✓ yt-dlp 已更新：$cur → $newv（项目 bin/ 内）"
+  date +%s > "$CKF" 2>/dev/null || true
+  return 0
+}
+
 # ---------------- 环境自检（成功静默，缺失才说话）----------------
 missing=""
 JS_MISSING=0
@@ -106,6 +185,9 @@ if [ -n "$PY" ]; then ok "python   $(command -v "$PY")"; else bad 'python   未�
 if [ -x bin/yt-dlp ]; then ok 'yt-dlp   项目 bin/ 内';
 elif have yt-dlp; then ok "yt-dlp   $(command -v yt-dlp)";
 else bad 'yt-dlp   未安装'; missing="$missing yt-dlp"; fi
+
+# yt-dlp 版本太旧就自动更新到项目 bin/（不动系统包）
+if [ -n "$PY" ]; then ensure_ytdlp_fresh || true; fi
 
 # ffmpeg：Termux 里经常“装了却跑不起来”（包与库版本错位），必须实际执行一次才算可用
 # 优先用项目自带的 bin/ffmpeg（静态版，不受 Termux 库问题影响）

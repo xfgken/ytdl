@@ -212,6 +212,20 @@ ytdl cookies
 
 仓库侧已经做了两层保护：`.gitignore` 忽略 `cookies.txt`（防止误提交），程序内没找到 cookies 时会在自检里明确提示并打印导出指引。
 
+**Q：报 `The page needs to be reloaded.`（cookies、JS 运行时都正常，还是失败）？**
+
+A：**yt-dlp 版本太旧了** —— YouTube 改动频繁，旧版跟不上就会报这个错（跟 cookies、deno 都无关）。
+
+`ytdl` 启动自检现在会检查版本：**超过 30 天就自动下载最新版**到项目 `bin/yt-dlp` 并优先使用 —— 不动系统包、不怕 `pkg upgrade` 覆盖，7 天内也不重复联网下载。
+
+想立刻强制更新一次：
+
+```sh
+cd ~/ytdl && rm -f bin/yt-dlp bin/.ytdlp-check && ytdl
+```
+
+> Termux 仓库里的 `pkg install yt-dlp` 常常滞后一两个月（例：仓库还是 `2026.06.09`，官方已到 `2026.08.19`），所以本项目自带的更新比系统包更及时；两者互不影响。
+
 **Q：安装时报 `429 Too Many Requests` 或 `repository ... is not signed`？**
 
 A：这是 Termux 官方镜像被限流（或临时未签名），跟你手机无关。新版 `get.sh` / `ytdl.sh` 遇到这种情况会**自动依次切换清华 / 中科大 / 阿里镜像再重试**，原来的源会备份在 `$PREFIX/etc/apt/sources.list.ytdl.bak`。
