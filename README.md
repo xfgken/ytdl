@@ -63,7 +63,7 @@ ln -sf ~/ytdl/ytdl.sh /usr/local/bin/ytdl     # 有权限的 Linux
   ✓ yt-dlp 2026.08.19
   ✓ ffmpeg  /data/data/com.termux/files/home/ytdl/bin/ffmpeg
   ✓ JS 运行时 node
-  /sdcard/Download/YouTube
+  /sdcard/Download
   请输入解析的链接（q 退出）> https://youtube.com/shorts/xxxx
 
  1. 开始解析
@@ -91,7 +91,7 @@ ln -sf ~/ytdl/ytdl.sh /usr/local/bin/ytdl     # 有权限的 Linux
  ✓ 音轨正常：h264 + aac
 ✓ 完成
   给老父亲气笑了 影视_1080p.mp4
-  /sdcard/Download/YouTube
+  /sdcard/Download
   6.4 MB · 0:26 · h264 · 1080×1920 · aac
 ```
 
@@ -117,9 +117,9 @@ ln -sf ~/ytdl/ytdl.sh /usr/local/bin/ytdl     # 有权限的 Linux
 按顺序取**第一个可写**的目录：
 
 1. 环境变量 `YTDL_OUT_DIR`（设置了就用它）
-2. `/sdcard/Download/YouTube`
-3. `~/storage/downloads/YouTube`（Termux 已授权存储时）
-4. `~/YouTube`
+2. `/sdcard/Download`
+3. `~/storage/downloads`（Termux 已授权存储时）
+4. `~/Downloads`
 
 文件名不以点开头（相册能扫到），重名自动加 `_1` / `_2`，**绝不覆盖旧文件**。
 
@@ -258,7 +258,7 @@ A：不影响下载。想消掉提示：`pkg install deno`，或改用已安装�
 
 **Q：相册看不到成品？**
 
-A：成品默认在 `/sdcard/Download/YouTube`。Termux 需要先 `termux-setup-storage` 授权，授权后也可能落在 `~/storage/downloads/YouTube`（就是手机「下载」目录）。
+A：成品默认在 `/sdcard/Download`。Termux 需要先 `termux-setup-storage` 授权，授权后也可能落在 `~/storage/downloads`（就是手机「下载」目录）。
 
 **Q：1080p 为什么不是一条直链？**
 

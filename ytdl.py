@@ -351,10 +351,11 @@ def pick_out_dir():
     env = os.environ.get('YTDL_OUT_DIR')
     if env:
         cands.append(env)
-    cands.append('/sdcard/Download/YouTube')
-    cands.append(os.path.join(home, 'storage', 'downloads', 'YouTube'))
-    cands.append(os.path.join(home, 'storage', 'shared', 'Download', 'YouTube'))
-    cands.append(os.path.join(home, 'YouTube'))
+    # 直接放「下载」目录本身（不建子目录），按顺序取第一个可写的
+    cands.append('/sdcard/Download')
+    cands.append(os.path.join(home, 'storage', 'downloads'))
+    cands.append(os.path.join(home, 'storage', 'shared', 'Download'))
+    cands.append(os.path.expanduser('~/Downloads'))
     for c in cands:
         try:
             os.makedirs(c, exist_ok=True)
